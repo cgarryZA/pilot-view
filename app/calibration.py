@@ -15,6 +15,7 @@ DEFAULTS: dict[str, Any] = {
         "model_offset": {"x": 0.0, "y": 0.0, "z": 0.0},
         "model_yaw_deg": 0.0,
         "model_scale": 1.0,
+        "model_mirror_x": False,  # set True when GLB is LHD but car is RHD (or vice versa)
     },
     "live_view": {
         "camera_position": {"x": 0.0, "y": 1.45, "z": 5.6},

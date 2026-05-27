@@ -37,7 +37,8 @@ export function createCalibration({ scene, panel, onChange }) {
   function bindInputs() {
     inputs = Array.from(panel.querySelectorAll('input[data-path]'));
     for (const input of inputs) {
-      input.addEventListener('input', () => onInputChanged(input));
+      const evt = input.type === 'checkbox' ? 'change' : 'input';
+      input.addEventListener(evt, () => onInputChanged(input));
     }
   }
 
@@ -45,7 +46,9 @@ export function createCalibration({ scene, panel, onChange }) {
     current = cal;
     for (const input of inputs) {
       const v = getPath(cal, input.dataset.path);
-      if (typeof v === 'number') {
+      if (input.type === 'checkbox') {
+        input.checked = !!v;
+      } else if (typeof v === 'number') {
         // Avoid clobbering the input while the user is typing.
         if (document.activeElement !== input) {
           input.value = String(v);
@@ -58,13 +61,20 @@ export function createCalibration({ scene, panel, onChange }) {
 
   function onInputChanged(input) {
     if (!current) return;
-    const raw = input.value;
-    if (raw === '' || raw === '-') return;
-    const num = parseFloat(raw);
-    if (!Number.isFinite(num)) return;
+
+    let value;
+    if (input.type === 'checkbox') {
+      value = input.checked;
+    } else {
+      const raw = input.value;
+      if (raw === '' || raw === '-') return;
+      const num = parseFloat(raw);
+      if (!Number.isFinite(num)) return;
+      value = num;
+    }
 
     const next = JSON.parse(JSON.stringify(current));
-    setPath(next, input.dataset.path, num);
+    setPath(next, input.dataset.path, value);
     current = next;
 
     if (scene) scene.applyCalibration(current);

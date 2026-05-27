@@ -411,7 +411,8 @@ export function createScene(container) {
       const yawDeg = cal.vehicle.model_yaw_deg || 0;
       car.meshHolder.rotation.y = (yawDeg * Math.PI) / 180;
       const s = cal.vehicle.model_scale || 1;
-      car.meshHolder.scale.setScalar(s);
+      const sx = cal.vehicle.model_mirror_x ? -s : s;
+      car.meshHolder.scale.set(sx, s, s);
     }
 
     // Live camera position / look-at / FOV
