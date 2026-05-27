@@ -9,6 +9,7 @@ when iterating on UI before Tailscale/HTTPS is set up.
 """
 
 import base64
+import json
 import os
 import secrets
 import threading
@@ -183,7 +184,7 @@ async def register_begin(request: Request, payload: dict):
     challenge_id = _stash_challenge(options.challenge, "register", {"nickname": nickname})
     return {
         "challenge_id": challenge_id,
-        "options": options_to_json(options),
+        "options": json.loads(options_to_json(options)),
     }
 
 
@@ -240,7 +241,7 @@ async def login_begin(request: Request):
     challenge_id = _stash_challenge(options.challenge, "login")
     return {
         "challenge_id": challenge_id,
-        "options": options_to_json(options),
+        "options": json.loads(options_to_json(options)),
     }
 
 
