@@ -1,6 +1,7 @@
 import * as THREE from 'https://esm.sh/three@0.169.0';
 import { OrbitControls } from 'https://esm.sh/three@0.169.0/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'https://esm.sh/three@0.169.0/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'https://esm.sh/three@0.169.0/examples/jsm/libs/meshopt_decoder.module.js';
 
 const COLOR = {
   carMesh:   0x9bd4ff,
@@ -253,6 +254,9 @@ export function createScene(container) {
 
   // ─── GLB loading (swappable per vehicle) ───
   const loader = new GLTFLoader();
+  // Decimated GLBs use the EXT_meshopt_compression extension. Register the
+  // decoder once so loader.load can decompress them.
+  loader.setMeshoptDecoder(MeshoptDecoder);
   let currentModelUrl = null;
 
   function loadCarModel(url) {
