@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#04070d" />
+    <title>Pilot View</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">PV</div>
+          <div class="brand-text">
+            <div class="brand-name">PILOT&nbsp;VIEW</div>
+            <div class="brand-sub">GARAGE VISION</div>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <a class="nav-item active" data-view="overview">Overview</a>
+          <a class="nav-item disabled" data-view="vision">Vision</a>
+          <a class="nav-item disabled" data-view="calibration">Calibration</a>
+          <a class="nav-item disabled" data-view="diagnostics">Diagnostics</a>
+          <a class="nav-item disabled" data-view="settings">Settings</a>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="clock" id="clock">--:--</div>
+          <div class="date" id="date">—</div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <div class="title">Overview</div>
+            <div class="subtitle">Garage vision &amp; parking assist</div>
+          </div>
+          <div class="topbar-right">
+            <div class="pill" id="server-pill">
+              <span class="dot dot-offline"></span>
+              <span class="pill-text">Server</span>
+            </div>
+            <div class="pill" id="camera-pill">
+              <span class="dot dot-offline"></span>
+              <span class="pill-text">Camera</span>
+            </div>
+          </div>
+        </header>
+
+        <section class="stage" id="stage">
+          <div class="stage-card stage-card--alert" id="stage-card">
+            <div class="stage-status">
+              <span class="dot dot-danger pulse"></span>
+              <span>NO SIGNAL</span>
+            </div>
+
+            <div class="stage-head">
+              <div class="stage-headline">CAMERA DISCONNECTED</div>
+              <div class="stage-sub">Awaiting Orbbec Gemini 2 depth camera</div>
+            </div>
+
+            <div class="stage-list">
+              <div class="stage-list-row">
+                <span class="row-label">Device</span>
+                <span class="row-value" id="cam-model">—</span>
+              </div>
+              <div class="stage-list-row">
+                <span class="row-label">Interface</span>
+                <span class="row-value" id="cam-iface">—</span>
+              </div>
+              <div class="stage-list-row">
+                <span class="row-label">Serial</span>
+                <span class="row-value" id="cam-serial">—</span>
+              </div>
+              <div class="stage-list-row">
+                <span class="row-label">Firmware</span>
+                <span class="row-value" id="cam-firmware">—</span>
+              </div>
+              <div class="stage-list-row">
+                <span class="row-label">Last attempt</span>
+                <span class="row-value" id="cam-last">never</span>
+              </div>
+              <div class="stage-list-row">
+                <span class="row-label">Error</span>
+                <span class="row-value" id="cam-error">none</span>
+              </div>
+            </div>
+
+            <div class="stage-foot">
+              <div class="scanner"><span class="scanner-line"></span></div>
+              <div class="scanner-label">Scanning USB bus…</div>
+            </div>
+          </div>
+        </section>
+
+        <footer class="statusbar">
+          <div class="statusbar-item">
+            <span class="row-label">Build</span>
+            <span class="row-value" id="build-id">dev</span>
+          </div>
+          <div class="statusbar-item">
+            <span class="row-label">Stream</span>
+            <span class="row-value" id="stream-status">idle</span>
+          </div>
+          <div class="statusbar-item">
+            <span class="row-label">Latency</span>
+            <span class="row-value" id="latency">— ms</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
