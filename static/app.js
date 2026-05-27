@@ -186,6 +186,8 @@ els.lightsPill.addEventListener('click', toggleLights);
 // ─── Temporary: mesh quality cycler (for picking decimation ratio) ───
 const QUALITY_LEVELS = [
   { id: 'original', label: 'Original' },
+  { id: '70', label: '70%' },
+  { id: '50', label: '50%' },
   { id: '30', label: '30%' },
   { id: '10', label: '10%' },
   { id: '3', label: '3%' },
