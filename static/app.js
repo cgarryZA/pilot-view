@@ -586,7 +586,11 @@ function applyState(payload) {
 
   if (payload.vehicles?.active) {
     currentActiveVehicle = payload.vehicles.active;
-    if (scene) scene.applyActiveVehicle(currentActiveVehicle);
+    // Don't clobber an active calibration edit with potentially stale WS data.
+    const calibBusy = calib && calib.isEditing && calib.isEditing();
+    if (scene && !calibBusy) {
+      scene.applyActiveVehicle(currentActiveVehicle);
+    }
   }
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
@@ -600,7 +604,16 @@ function applyState(payload) {
   if (c.connected && g) {
     showConnected();
     setLiveBackground(payload.live_url);
-    scene.applyGeometry(g);
+    // During a calibration edit, send the geometry minus garage dims — the
+    // calibration panel has already updated the garage optimistically, and a
+    // stale server payload would briefly snap it back.
+    const calibBusy = calib && calib.isEditing && calib.isEditing();
+    if (calibBusy) {
+      const { garage: _omit, ...rest } = g;
+      scene.applyGeometry(rest);
+    } else {
+      scene.applyGeometry(g);
+    }
 
     // HUD state pill
     const state = g.state || 'safe';

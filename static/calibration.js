@@ -34,6 +34,11 @@ export function createCalibration({ scene, panel, onChange }) {
   let current = null;
   let inputs = [];
   let activeVehicleId = null;
+  // When the user is actively editing, suppress WS-driven scene resets for a
+  // short window so the optimistic update isn't clobbered by a still-stale
+  // server payload during the save round-trip.
+  let editingLockUntil = 0;
+  const EDITING_LOCK_MS = 600;
 
   function bindInputs() {
     inputs = Array.from(panel.querySelectorAll('input[data-path]'));
@@ -93,6 +98,10 @@ export function createCalibration({ scene, panel, onChange }) {
     setPath(next, translatePath(input.dataset.path), value);
     current = next;
 
+    // Lock out WS-driven scene resets briefly so the optimistic update sticks
+    // visually while we wait for the save to round-trip.
+    editingLockUntil = Date.now() + EDITING_LOCK_MS;
+
     if (scene) scene.applyCalibration(current);
     pushActiveVehicleToScene(current);
     if (onChange) onChange(current);
@@ -105,12 +114,17 @@ export function createCalibration({ scene, panel, onChange }) {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(current),
+        credentials: 'same-origin',
       });
-      if (res.ok) showSaved();
+      if (res.ok) {
+        showSaved();
+      } else {
+        console.error('[calibration] save returned', res.status);
+      }
     } catch (err) {
       console.error('[calibration] save failed', err);
     }
-  }, 200);
+  }, 80);
 
   function showSaved() {
     savedEl.classList.add('visible');
@@ -168,9 +182,14 @@ export function createCalibration({ scene, panel, onChange }) {
   bindInputs();
   load();
 
+  function isEditing() {
+    return Date.now() < editingLockUntil;
+  }
+
   return {
     reload: load,
     setActiveVehicle,
     current: () => current,
+    isEditing,
   };
 }

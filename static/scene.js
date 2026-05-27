@@ -468,7 +468,15 @@ export function createScene(container) {
   function applyCalibration(cal) {
     if (!cal) return;
     // Vehicle-specific things live in applyActiveVehicle.
-    // applyCalibration only handles things tied to the whole scene.
+    // applyCalibration handles scene-wide knobs the calibration panel exposes.
+
+    if (cal.garage) {
+      const g = cal.garage;
+      if (typeof g.width === 'number' && typeof g.length === 'number' && typeof g.height === 'number') {
+        rebuildGarage(g.width, g.length, g.height);
+      }
+    }
+
     if (cal.live_view) {
       const lv = cal.live_view;
       if (lv.camera_position) {
