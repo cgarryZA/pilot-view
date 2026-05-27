@@ -733,12 +733,24 @@ function showAuthOverlay(state) {
   els.authOverlay.classList.remove('hidden');
   els.authError.textContent = '';
 
+  if (!window.isSecureContext) {
+    els.authHeadline.textContent = 'HTTPS REQUIRED';
+    els.authSub.textContent =
+      'Passkeys only work over HTTPS. You\'re on an insecure URL right now (' +
+      window.location.host + '). Open the page at your Tailscale HTTPS hostname instead — usually something like pilot-view.tailXXXX.ts.net.';
+    els.authPrimaryBtn.disabled = true;
+    els.authPrimaryBtn.textContent = 'Unavailable';
+    els.authNicknameRow.classList.add('hidden');
+    return;
+  }
+
   if (!auth.isWebAuthnSupported()) {
     els.authHeadline.textContent = 'NOT SUPPORTED';
     els.authSub.textContent =
-      "This browser doesn't support passkeys. Use a modern browser on this device, or add a different device from an already-signed-in one.";
+      "This browser doesn't have the WebAuthn API. Use a modern browser (Chrome, Safari, Firefox, Edge) on this device.";
     els.authPrimaryBtn.disabled = true;
     els.authPrimaryBtn.textContent = 'Unavailable';
+    els.authNicknameRow.classList.add('hidden');
     return;
   }
 
