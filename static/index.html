@@ -39,6 +39,9 @@
             <div class="subtitle">Garage vision &amp; parking assist</div>
           </div>
           <div class="topbar-right">
+            <div class="pill" id="source-pill">
+              <span class="pill-text">—</span>
+            </div>
             <div class="pill" id="server-pill">
               <span class="dot dot-offline"></span>
               <span class="pill-text">Server</span>
@@ -51,7 +54,8 @@
         </header>
 
         <section class="stage" id="stage">
-          <div class="stage-card stage-card--alert" id="stage-card">
+          <!-- Disconnected view -->
+          <div class="stage-card stage-card--alert" id="disconnected-view">
             <div class="stage-status">
               <span class="dot dot-danger pulse"></span>
               <span>NO SIGNAL</span>
@@ -94,6 +98,48 @@
               <div class="scanner-label">Scanning USB bus…</div>
             </div>
           </div>
+
+          <!-- Connected (3D) view -->
+          <div class="scene-wrap hidden" id="connected-view">
+            <div class="scene-canvas" id="scene-canvas"></div>
+
+            <div class="scene-overlay">
+              <div class="scene-hud-top">
+                <div class="hud-card hud-state" id="hud-state">
+                  <div class="hud-state-label">STATUS</div>
+                  <div class="hud-state-value">SAFE</div>
+                </div>
+              </div>
+
+              <div class="scene-hud-bottom">
+                <div class="hud-card hud-clearances">
+                  <div class="hud-card-title">Clearances</div>
+                  <div class="hud-grid">
+                    <div class="hud-cell" data-key="front">
+                      <span class="hud-cell-label">Front</span>
+                      <span class="hud-cell-value" id="cl-front">—</span>
+                    </div>
+                    <div class="hud-cell" data-key="rear">
+                      <span class="hud-cell-label">Rear</span>
+                      <span class="hud-cell-value" id="cl-rear">—</span>
+                    </div>
+                    <div class="hud-cell" data-key="left">
+                      <span class="hud-cell-label">Left</span>
+                      <span class="hud-cell-value" id="cl-left">—</span>
+                    </div>
+                    <div class="hud-cell" data-key="right">
+                      <span class="hud-cell-label">Right</span>
+                      <span class="hud-cell-value" id="cl-right">—</span>
+                    </div>
+                    <div class="hud-cell" data-key="ceiling">
+                      <span class="hud-cell-label">Ceiling</span>
+                      <span class="hud-cell-value" id="cl-ceiling">—</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
 
         <footer class="statusbar">
@@ -113,6 +159,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script type="module" src="/static/app.js"></script>
   </body>
 </html>
