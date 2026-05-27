@@ -24,7 +24,7 @@ State transitions notify any registered listeners — used to chain automations
 
 import threading
 from datetime import datetime, timezone
-from typing import Callable, Iterable
+from typing import Callable, Iterable, Optional
 
 TRANSITION_SECONDS = 4.0
 
@@ -35,6 +35,9 @@ PARTIAL = "partial"
 FAULT = "fault"
 
 DoorListener = Callable[[str, str], None]  # (old_status, new_status) -> None
+
+# A guard returns None to allow the trigger, or a human-readable reason to block.
+DoorGuard = Callable[[], Optional[str]]
 
 
 def _now() -> str:
@@ -49,6 +52,7 @@ class Door:
         self._last_changed = _now()
         self._timer: threading.Timer | None = None
         self._listeners: list[DoorListener] = []
+        self._guards: list[DoorGuard] = []
         self._lock = threading.Lock()
 
     # ── status derivation ───────────────────────────────────────────────
@@ -80,9 +84,34 @@ class Door:
     def add_listener(self, fn: DoorListener) -> None:
         self._listeners.append(fn)
 
+    def add_guard(self, fn: DoorGuard) -> None:
+        """Register a callback that can veto an open/close trigger.
+
+        Called BEFORE any state change. Return None to allow, or a string
+        describing why the trigger should be blocked. Guards run outside the
+        Door's lock so they're free to inspect other modules (camera state, etc).
+        """
+        self._guards.append(fn)
+
+    def _check_guards(self) -> Optional[str]:
+        for guard in list(self._guards):
+            try:
+                reason = guard()
+            except Exception as exc:  # pragma: no cover — defensive
+                print(f"[door] guard error: {exc}")
+                continue
+            if reason:
+                return reason
+        return None
+
     # ── triggers (simulated for now) ────────────────────────────────────
 
     def trigger_open(self) -> dict:
+        blocked = self._check_guards()
+        if blocked:
+            snap = self.status_dict()
+            snap["blocked_reason"] = blocked
+            return snap
         return self._begin_transition(
             allowed_from=(CLOSED, PARTIAL),
             new_closed=False,
@@ -92,6 +121,11 @@ class Door:
         )
 
     def trigger_close(self) -> dict:
+        blocked = self._check_guards()
+        if blocked:
+            snap = self.status_dict()
+            snap["blocked_reason"] = blocked
+            return snap
         return self._begin_transition(
             allowed_from=(OPEN, PARTIAL),
             new_closed=False,
@@ -101,6 +135,11 @@ class Door:
         )
 
     def trigger_toggle(self) -> dict:
+        blocked = self._check_guards()
+        if blocked:
+            snap = self.status_dict()
+            snap["blocked_reason"] = blocked
+            return snap
         with self._lock:
             current = self.status()
         if current in (CLOSED, PARTIAL):

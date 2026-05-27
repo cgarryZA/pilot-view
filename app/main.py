@@ -12,7 +12,7 @@ from app.door import door
 from app.lights import lights
 from app.passkeys import SESSION_COOKIE_NAME, sessions
 from app.sensors import sensors
-from app.sources import make_source
+from app.sources import source
 from app.vehicles import vehicles
 
 automations.install()
@@ -36,8 +36,6 @@ async def add_cache_control(request, call_next):
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-source = make_source()
 
 
 # ─── Open endpoints (no auth) ───────────────────────────────────────────

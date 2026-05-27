@@ -59,6 +59,21 @@ const els = {
 
 const pad = (n) => String(n).padStart(2, '0');
 
+// ─── Toast ────────────────────────────────────────────
+const toastEl = $('toast');
+let toastTimer = null;
+const TOAST_KINDS = ['toast-info', 'toast-warn', 'toast-danger'];
+
+function showToast(message, kind = 'info', duration = 3500) {
+  if (!toastEl || !message) return;
+  toastEl.textContent = message;
+  for (const c of TOAST_KINDS) toastEl.classList.remove(c);
+  toastEl.classList.add(`toast-${kind}`);
+  toastEl.classList.add('visible');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('visible'), duration);
+}
+
 function tickClock() {
   const d = new Date();
   els.clock.textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -165,7 +180,13 @@ function applyLightsState(l) {
 
 async function toggleDoor() {
   try {
-    await fetch('/api/door/toggle', { method: 'POST' });
+    const res = await fetch('/api/door/toggle', { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.blocked_reason) {
+        showToast(data.blocked_reason, 'warn');
+      }
+    }
   } catch (err) {
     console.error('[door] toggle failed', err);
   }

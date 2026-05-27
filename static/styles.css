@@ -50,6 +50,45 @@ body {
 
 .hidden { display: none !important; }
 
+/* ─── Toast (transient notifications) ─────────────────── */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%) translateY(40px);
+  background: rgba(15, 23, 36, 0.95);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 12px 22px;
+  color: var(--text);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  max-width: min(560px, 90vw);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  z-index: 900;
+  backdrop-filter: blur(10px);
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.toast.toast-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.toast.toast-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 24px var(--danger-glow);
+}
+
 /* ─── Auth overlay ────────────────────────────────────── */
 .auth-overlay {
   position: fixed;

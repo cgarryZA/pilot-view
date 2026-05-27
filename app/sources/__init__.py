@@ -17,4 +17,15 @@ def make_source() -> CameraSource:
     return cls()
 
 
-__all__ = ["CameraSource", "DisconnectedSource", "SyntheticSource", "make_source"]
+# Singleton — created once at module import. main.py and automations.py both
+# read from this so guards and the WS payload share the same instance.
+source: CameraSource = make_source()
+
+
+__all__ = [
+    "CameraSource",
+    "DisconnectedSource",
+    "SyntheticSource",
+    "make_source",
+    "source",
+]
