@@ -97,6 +97,7 @@ def load() -> dict:
         try:
             with CONFIG_FILE.open() as f:
                 loaded = json.load(f)
+            _strip_legacy_keys(loaded)
             return _deep_merge(DEFAULTS, loaded)
         except (json.JSONDecodeError, OSError):
             return deepcopy(DEFAULTS)
@@ -106,7 +107,9 @@ def save(updates: dict) -> dict:
     """Merge updates into current calibration and persist. Returns the new full calibration."""
     with _lock:
         current = load_unlocked()
+        _strip_legacy_keys(updates)  # in case client still sends stale schema
         merged = _deep_merge(current, updates)
+        _strip_legacy_keys(merged)
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         tmp = CONFIG_FILE.with_suffix(".json.tmp")
         with tmp.open("w") as f:
@@ -130,6 +133,17 @@ def load_unlocked() -> dict:
     try:
         with CONFIG_FILE.open() as f:
             loaded = json.load(f)
+        _strip_legacy_keys(loaded)
         return _deep_merge(DEFAULTS, loaded)
     except (json.JSONDecodeError, OSError):
         return deepcopy(DEFAULTS)
+
+
+def _strip_legacy_keys(d: dict) -> None:
+    """Remove keys from older schemas so they can't shadow current ones.
+
+    A top-level 'vehicle' (singular) was the old name for what's now
+    vehicles.registry.<id>. Any save that includes 'vehicle' would have been
+    cruft — read-side strip plus the save() path scrubs the file over time.
+    """
+    d.pop("vehicle", None)

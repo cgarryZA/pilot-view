@@ -267,10 +267,13 @@ function applyVehicleState(v) {
   pill.disabled = vehicleDriverName !== 'synthetic';
   pill.style.cursor = vehicleDriverName === 'synthetic' ? 'pointer' : 'default';
 
-  // Notify calibration if active vehicle changed
-  if (v?.active_id !== activeVehicleId) {
-    activeVehicleId = v?.active_id || null;
-    if (calib && calib.setActiveVehicle) calib.setActiveVehicle(activeVehicleId);
+  activeVehicleId = v?.active_id || null;
+  // Always push to calib (idempotent: it early-returns if the id is unchanged).
+  // The earlier "only when it changes" check missed the case where calib was
+  // created AFTER the first WS payload — calib's internal id stayed null
+  // forever and all calibration edits hit the wrong storage path.
+  if (calib && calib.setActiveVehicle && activeVehicleId) {
+    calib.setActiveVehicle(activeVehicleId);
   }
 }
 
