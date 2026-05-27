@@ -5,3 +5,7 @@ __pycache__/
 
 # Runtime calibration is per-machine — defaults live in app/calibration.py
 config/calibration.json
+
+# Per-machine auth state — passkeys must NEVER be in version control
+config/passkeys.json
+config/sessions.json

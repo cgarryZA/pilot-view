@@ -1,5 +1,6 @@
 import { createScene } from '/static/scene.js';
 import { createCalibration } from '/static/calibration.js';
+import * as auth from '/static/auth.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,6 +17,14 @@ const els = {
   tempPill: $('temp-pill'),
   humidityPill: $('humidity-pill'),
   qualityPill: $('quality-pill'),
+  authOverlay: $('auth-overlay'),
+  authHeadline: $('auth-headline'),
+  authSub: $('auth-sub'),
+  authNicknameRow: $('auth-nickname-row'),
+  authNicknameInput: $('auth-nickname'),
+  authPrimaryBtn: $('auth-primary-btn'),
+  authError: $('auth-error'),
+  authFoot: $('auth-foot'),
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
@@ -690,13 +699,102 @@ function connect() {
     }
   };
 
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     setPill(els.serverPill, false, 'Server');
     els.streamStatus.textContent = 'reconnecting';
+    // 1008 = policy violation (session invalid). Don't reconnect; show login.
+    if (ev && ev.code === 1008) {
+      showAuthOverlay({ has_passkeys: true });
+      return;
+    }
     setTimeout(connect, 1500);
   };
 
   ws.onerror = () => ws.close();
 }
 
-connect();
+// ─── Auth bootstrap ─────────────────────────────────
+async function startApp() {
+  try {
+    const s = await auth.status();
+    if (s.authenticated) {
+      hideAuthOverlay();
+      connect();
+    } else {
+      showAuthOverlay(s);
+    }
+  } catch (err) {
+    console.error('[auth] status check failed', err);
+    showAuthOverlay({ has_passkeys: false });
+  }
+}
+
+function showAuthOverlay(state) {
+  els.authOverlay.classList.remove('hidden');
+  els.authError.textContent = '';
+
+  if (!auth.isWebAuthnSupported()) {
+    els.authHeadline.textContent = 'NOT SUPPORTED';
+    els.authSub.textContent =
+      "This browser doesn't support passkeys. Use a modern browser on this device, or add a different device from an already-signed-in one.";
+    els.authPrimaryBtn.disabled = true;
+    els.authPrimaryBtn.textContent = 'Unavailable';
+    return;
+  }
+
+  if (state.has_passkeys) {
+    els.authHeadline.textContent = 'SIGN IN';
+    els.authSub.textContent = 'Authenticate with your passkey to continue.';
+    els.authNicknameRow.classList.add('hidden');
+    els.authPrimaryBtn.textContent = 'Use passkey';
+    els.authPrimaryBtn.onclick = handleLogin;
+    els.authFoot.textContent = '';
+  } else {
+    els.authHeadline.textContent = 'FIRST DEVICE';
+    els.authSub.textContent =
+      'No devices are registered yet. This device becomes the trusted master — name it and register a passkey.';
+    els.authNicknameRow.classList.remove('hidden');
+    els.authPrimaryBtn.textContent = 'Register this device';
+    els.authPrimaryBtn.onclick = handleRegister;
+    els.authFoot.textContent = 'After this, all future devices must be added from a signed-in one.';
+  }
+}
+
+function hideAuthOverlay() {
+  els.authOverlay.classList.add('hidden');
+}
+
+async function handleRegister() {
+  const nickname = els.authNicknameInput.value.trim() || 'First device';
+  els.authError.textContent = '';
+  els.authPrimaryBtn.disabled = true;
+  els.authPrimaryBtn.textContent = 'Waiting for passkey…';
+  try {
+    await auth.register(nickname);
+    hideAuthOverlay();
+    connect();
+  } catch (err) {
+    els.authError.textContent = err.message || String(err);
+  } finally {
+    els.authPrimaryBtn.disabled = false;
+    els.authPrimaryBtn.textContent = 'Register this device';
+  }
+}
+
+async function handleLogin() {
+  els.authError.textContent = '';
+  els.authPrimaryBtn.disabled = true;
+  els.authPrimaryBtn.textContent = 'Waiting for passkey…';
+  try {
+    await auth.login();
+    hideAuthOverlay();
+    connect();
+  } catch (err) {
+    els.authError.textContent = err.message || String(err);
+  } finally {
+    els.authPrimaryBtn.disabled = false;
+    els.authPrimaryBtn.textContent = 'Use passkey';
+  }
+}
+
+startApp();

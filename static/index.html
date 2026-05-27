@@ -436,6 +436,31 @@
       </main>
     </div>
 
+    <div class="auth-overlay hidden" id="auth-overlay">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <div class="brand-mark">PV</div>
+          <div class="brand-text">
+            <div class="brand-name">PILOT&nbsp;VIEW</div>
+            <div class="brand-sub">GARAGE VISION</div>
+          </div>
+        </div>
+
+        <h2 class="auth-headline" id="auth-headline">SIGN IN</h2>
+        <p class="auth-sub" id="auth-sub">Authenticate with a passkey to continue.</p>
+
+        <div class="auth-row auth-nickname hidden" id="auth-nickname-row">
+          <label for="auth-nickname">Name this device</label>
+          <input type="text" id="auth-nickname" placeholder="e.g. Alex iPhone" maxlength="50" />
+        </div>
+
+        <button class="auth-primary" id="auth-primary-btn">Use passkey</button>
+
+        <div class="auth-error" id="auth-error"></div>
+        <div class="auth-foot" id="auth-foot"></div>
+      </div>
+    </div>
+
     <script type="module" src="/static/app.js"></script>
   </body>
 </html>
