@@ -363,14 +363,26 @@ export function createScene(container) {
 
   // ─── animation loop ───
   let running = true;
-  function tick() {
+  // FPS tracking: simple moving window over the last second of frames.
+  const frameTimes = [];
+  function tick(now) {
     if (!running) return;
     requestAnimationFrame(tick);
+
+    const t = now || performance.now();
+    frameTimes.push(t);
+    const cutoff = t - 1000;
+    while (frameTimes.length && frameTimes[0] < cutoff) frameTimes.shift();
+
     if (mode === 'orbit') controls.update();
     updateWallOpacities();
     renderer.render(scene, activeCamera);
   }
   tick();
+
+  function getFps() {
+    return frameTimes.length;
+  }
 
   // ─── external API ───
   function applyGeometry(geom) {
@@ -473,6 +485,7 @@ export function createScene(container) {
     applyActiveVehicle,
     setMode,
     destroy,
+    getFps,
     get mode() { return mode; },
   };
 }

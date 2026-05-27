@@ -22,7 +22,7 @@
           <a class="nav-item active" data-view="overview">Overview</a>
           <a class="nav-item disabled" data-view="vision">Vision</a>
           <a class="nav-item" data-view="calibration">Calibration</a>
-          <a class="nav-item disabled" data-view="diagnostics">Diagnostics</a>
+          <a class="nav-item" data-view="diagnostics">Diagnostics</a>
           <a class="nav-item disabled" data-view="settings">Settings</a>
         </nav>
 
@@ -305,6 +305,70 @@
               <div class="calib-footer">
                 <button class="calib-btn calib-btn--ghost" id="calib-reset">Reset to defaults</button>
                 <div class="calib-saved" id="calib-saved">Saved</div>
+              </div>
+            </aside>
+
+            <aside class="diag-panel" id="diag-panel" aria-hidden="true">
+              <div class="calib-header">
+                <div class="calib-title">DIAGNOSTICS</div>
+                <button class="calib-close" id="diag-close" aria-label="Close">×</button>
+              </div>
+
+              <div class="diag-body">
+                <div class="diag-group-title">Pi system</div>
+                <div class="diag-row">
+                  <div class="diag-row-head">
+                    <span class="diag-label">CPU</span>
+                    <span class="diag-value" id="diag-cpu">— %</span>
+                  </div>
+                  <div class="diag-bar"><div class="diag-bar-fill" id="diag-cpu-bar"></div></div>
+                  <div class="diag-sub" id="diag-cpu-sub">— cores</div>
+                </div>
+                <div class="diag-row">
+                  <div class="diag-row-head">
+                    <span class="diag-label">Memory</span>
+                    <span class="diag-value" id="diag-mem">— / — MB</span>
+                  </div>
+                  <div class="diag-bar"><div class="diag-bar-fill" id="diag-mem-bar"></div></div>
+                </div>
+                <div class="diag-row">
+                  <div class="diag-row-head">
+                    <span class="diag-label">Disk (/)</span>
+                    <span class="diag-value" id="diag-disk">— / — GB</span>
+                  </div>
+                  <div class="diag-bar"><div class="diag-bar-fill" id="diag-disk-bar"></div></div>
+                </div>
+                <div class="diag-row">
+                  <div class="diag-row-head">
+                    <span class="diag-label">CPU temperature</span>
+                    <span class="diag-value" id="diag-temp">— °C</span>
+                  </div>
+                  <div class="diag-bar"><div class="diag-bar-fill" id="diag-temp-bar"></div></div>
+                </div>
+
+                <div class="diag-group-title">Pilot View service</div>
+                <div class="diag-kv">
+                  <span class="diag-label">Uptime</span>
+                  <span class="diag-value" id="diag-uptime">—</span>
+                </div>
+                <div class="diag-kv">
+                  <span class="diag-label">Process memory</span>
+                  <span class="diag-value" id="diag-procmem">— MB</span>
+                </div>
+                <div class="diag-kv">
+                  <span class="diag-label">Pi system uptime</span>
+                  <span class="diag-value" id="diag-sysuptime">—</span>
+                </div>
+
+                <div class="diag-group-title">Rendering</div>
+                <div class="diag-kv">
+                  <span class="diag-label">Browser FPS</span>
+                  <span class="diag-value" id="diag-fps">— fps</span>
+                </div>
+                <div class="diag-kv">
+                  <span class="diag-label">WS latency</span>
+                  <span class="diag-value" id="diag-latency">— ms</span>
+                </div>
               </div>
             </aside>
 

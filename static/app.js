@@ -354,10 +354,11 @@ els.viewToggle.addEventListener('click', (e) => {
   setViewMode(btn.dataset.mode);
 });
 
-// ─── App-level mode (overview vs calibration) ────────
+// ─── App-level mode (overview / calibration / diagnostics) ────────
 const PAGE_META = {
   overview: { title: 'Overview', subtitle: 'Garage vision & parking assist' },
   calibration: { title: 'Calibration', subtitle: 'Align scene to real garage & vehicle' },
+  diagnostics: { title: 'Diagnostics', subtitle: 'System performance & service health' },
 };
 
 function setAppMode(next) {
@@ -370,6 +371,8 @@ function setAppMode(next) {
   for (const item of els.nav.querySelectorAll('.nav-item')) {
     item.classList.toggle('active', item.dataset.view === next);
   }
+  if (next === 'diagnostics') startDiagnosticsPolling();
+  else stopDiagnosticsPolling();
 }
 
 els.nav.addEventListener('click', (e) => {
@@ -380,6 +383,137 @@ els.nav.addEventListener('click', (e) => {
 });
 
 document.addEventListener('app-mode', (e) => setAppMode(e.detail));
+
+// ─── Diagnostics polling ─────────────────────────────
+const diagEls = {
+  cpu: $('diag-cpu'),
+  cpuBar: $('diag-cpu-bar'),
+  cpuSub: $('diag-cpu-sub'),
+  mem: $('diag-mem'),
+  memBar: $('diag-mem-bar'),
+  disk: $('diag-disk'),
+  diskBar: $('diag-disk-bar'),
+  temp: $('diag-temp'),
+  tempBar: $('diag-temp-bar'),
+  uptime: $('diag-uptime'),
+  procmem: $('diag-procmem'),
+  sysuptime: $('diag-sysuptime'),
+  fps: $('diag-fps'),
+  latency: $('diag-latency'),
+  close: $('diag-close'),
+};
+
+if (diagEls.close) {
+  diagEls.close.addEventListener('click', () => setAppMode('overview'));
+}
+
+let diagInterval = null;
+let diagFpsRaf = null;
+
+function fmtDuration(seconds) {
+  if (seconds == null) return '—';
+  const s = Math.floor(seconds);
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m ${s % 60}s`;
+}
+
+function setBar(bar, percent, warnAt = 70, dangerAt = 90) {
+  if (!bar) return;
+  bar.classList.remove('warn', 'danger');
+  if (percent == null) {
+    bar.style.width = '0%';
+    return;
+  }
+  bar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  if (percent >= dangerAt) bar.classList.add('danger');
+  else if (percent >= warnAt) bar.classList.add('warn');
+}
+
+function applyDiagnostics(d) {
+  const cpu = d.cpu || {};
+  const mem = d.memory || {};
+  const disk = d.disk || {};
+  const temp = d.temperature || {};
+  const proc = d.process || {};
+  const sys = d.system || {};
+
+  diagEls.cpu.textContent = cpu.percent != null ? `${cpu.percent} %` : '— %';
+  setBar(diagEls.cpuBar, cpu.percent);
+  const load = cpu.load_avg ? `load ${cpu.load_avg.join(' / ')}` : '';
+  diagEls.cpuSub.textContent = `${cpu.cores ?? '—'} cores${load ? '  ·  ' + load : ''}`;
+
+  if (mem.total_mb != null) {
+    diagEls.mem.textContent = `${mem.used_mb} / ${mem.total_mb} MB`;
+    setBar(diagEls.memBar, mem.percent);
+  } else {
+    diagEls.mem.textContent = '—';
+    setBar(diagEls.memBar, null);
+  }
+
+  if (disk.total_gb != null) {
+    diagEls.disk.textContent = `${disk.used_gb} / ${disk.total_gb} GB`;
+    setBar(diagEls.diskBar, disk.percent, 80, 92);
+  } else {
+    diagEls.disk.textContent = '—';
+    setBar(diagEls.diskBar, null);
+  }
+
+  if (temp.cpu_c != null) {
+    diagEls.temp.textContent = `${temp.cpu_c} °C`;
+    // Pi 5 throttles at 80°C; warn at 65°C.
+    const pct = Math.min(100, (temp.cpu_c / 85) * 100);
+    setBar(diagEls.tempBar, pct, (65 / 85) * 100, (75 / 85) * 100);
+  } else {
+    diagEls.temp.textContent = '—';
+    setBar(diagEls.tempBar, null);
+  }
+
+  diagEls.uptime.textContent = fmtDuration(proc.uptime_s);
+  diagEls.procmem.textContent = proc.memory_mb != null ? `${proc.memory_mb} MB` : '—';
+  diagEls.sysuptime.textContent = fmtDuration(sys.uptime_s);
+}
+
+async function pollDiagnostics() {
+  try {
+    const res = await fetch('/api/diagnostics');
+    if (res.ok) applyDiagnostics(await res.json());
+  } catch (err) {
+    console.error('[diagnostics] poll failed', err);
+  }
+}
+
+function tickFps() {
+  if (appMode !== 'diagnostics') return;
+  if (scene && diagEls.fps) {
+    diagEls.fps.textContent = `${scene.getFps()} fps`;
+  }
+  if (els.latency && diagEls.latency) {
+    diagEls.latency.textContent = els.latency.textContent;
+  }
+  diagFpsRaf = requestAnimationFrame(tickFps);
+}
+
+function startDiagnosticsPolling() {
+  if (diagInterval) return;
+  pollDiagnostics();
+  diagInterval = setInterval(pollDiagnostics, 2000);
+  tickFps();
+}
+
+function stopDiagnosticsPolling() {
+  if (diagInterval) {
+    clearInterval(diagInterval);
+    diagInterval = null;
+  }
+  if (diagFpsRaf) {
+    cancelAnimationFrame(diagFpsRaf);
+    diagFpsRaf = null;
+  }
+}
 
 function setLiveBackground(url) {
   if (url === currentLiveUrl) return;

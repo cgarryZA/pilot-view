@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import automations, calibration
+from app import automations, calibration, diagnostics
 from app.battery_monitor import battery_monitor
 from app.door import door
 from app.lights import lights
@@ -94,6 +94,11 @@ def lights_toggle():
 @app.get("/api/environment")
 def get_environment():
     return sensors.read()
+
+
+@app.get("/api/diagnostics")
+def get_diagnostics():
+    return diagnostics.snapshot()
 
 
 @app.get("/api/vehicles")
