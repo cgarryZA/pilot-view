@@ -11,7 +11,9 @@ const els = {
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
+  sceneBackground: $('scene-background'),
   sceneCanvas: $('scene-canvas'),
+  viewToggle: $('view-toggle'),
 
   camModel: $('cam-model'),
   camIface: $('cam-iface'),
@@ -80,9 +82,13 @@ function classifyClearance(value, thresholds) {
 
 // ─── Scene lifecycle ─────────────────────────────────
 let scene = null;
+let viewMode = 'live';
+let currentLiveUrl = null;
+
 function ensureScene() {
   if (scene) return scene;
   scene = createScene(els.sceneCanvas);
+  scene.setMode(viewMode);
   return scene;
 }
 
@@ -95,6 +101,38 @@ function showConnected() {
   els.disconnected.classList.add('hidden');
   els.connected.classList.remove('hidden');
   ensureScene();
+}
+
+function setViewMode(next) {
+  if (next === viewMode) return;
+  viewMode = next;
+  for (const btn of els.viewToggle.querySelectorAll('.view-toggle-btn')) {
+    const active = btn.dataset.mode === next;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  els.connected.dataset.mode = next;
+  // Hide background when in orbit mode
+  els.sceneBackground.classList.toggle('visible', next === 'live' && !!currentLiveUrl);
+  if (scene) scene.setMode(next);
+}
+
+els.viewToggle.addEventListener('click', (e) => {
+  const btn = e.target.closest('.view-toggle-btn');
+  if (!btn) return;
+  setViewMode(btn.dataset.mode);
+});
+
+function setLiveBackground(url) {
+  if (url === currentLiveUrl) return;
+  currentLiveUrl = url;
+  if (url) {
+    els.sceneBackground.style.backgroundImage = `url("${url}")`;
+    if (viewMode === 'live') els.sceneBackground.classList.add('visible');
+  } else {
+    els.sceneBackground.style.backgroundImage = '';
+    els.sceneBackground.classList.remove('visible');
+  }
 }
 
 // ─── State application ──────────────────────────────
@@ -118,6 +156,7 @@ function applyState(payload) {
 
   if (c.connected && g) {
     showConnected();
+    setLiveBackground(payload.live_url);
     scene.applyGeometry(g);
 
     // HUD state pill

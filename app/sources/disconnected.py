@@ -7,6 +7,7 @@ class DisconnectedSource(CameraSource):
     def state(self) -> dict:
         return {
             "source": self.name,
+            "live_url": None,
             "camera": {
                 "connected": False,
                 "model": "Orbbec Gemini 2",

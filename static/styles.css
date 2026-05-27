@@ -406,6 +406,24 @@ body {
   overflow: hidden;
 }
 
+.scene-background {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  transition: opacity 0.4s ease, filter 0.4s ease;
+  opacity: 0;
+}
+
+.scene-background.visible {
+  opacity: 1;
+}
+
+.scene-wrap[data-mode="orbit"] .scene-background {
+  opacity: 0;
+}
+
 .scene-canvas {
   position: absolute;
   inset: 0;
@@ -429,8 +447,43 @@ body {
 
 .scene-hud-top {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: 12px;
+}
+
+.view-toggle {
+  pointer-events: auto;
+  display: inline-flex;
+  background: rgba(7, 12, 20, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px;
+  gap: 2px;
+  backdrop-filter: blur(10px);
+}
+
+.view-toggle-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.view-toggle-btn:hover { color: var(--text); }
+
+.view-toggle-btn.active {
+  color: #04070d;
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow);
 }
 
 .scene-hud-bottom {

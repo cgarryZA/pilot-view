@@ -101,10 +101,15 @@
 
           <!-- Connected (3D) view -->
           <div class="scene-wrap hidden" id="connected-view">
+            <div class="scene-background" id="scene-background"></div>
             <div class="scene-canvas" id="scene-canvas"></div>
 
             <div class="scene-overlay">
               <div class="scene-hud-top">
+                <div class="view-toggle" role="tablist" id="view-toggle">
+                  <button class="view-toggle-btn active" data-mode="live" role="tab" aria-selected="true">LIVE</button>
+                  <button class="view-toggle-btn" data-mode="orbit" role="tab" aria-selected="false">3D</button>
+                </div>
                 <div class="hud-card hud-state" id="hud-state">
                   <div class="hud-state-label">STATUS</div>
                   <div class="hud-state-value">SAFE</div>

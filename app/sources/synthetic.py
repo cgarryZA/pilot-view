@@ -60,6 +60,7 @@ class SyntheticSource(CameraSource):
         return {
             "source": self.name,
             "ts": datetime.now(timezone.utc).isoformat(),
+            "live_url": "/static/assets/synthetic/garage.png",
             "camera": {
                 "connected": True,
                 "model": "Orbbec Gemini 2 (synthetic)",
