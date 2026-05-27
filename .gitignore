@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# Runtime calibration is per-machine — defaults live in app/calibration.py
+config/calibration.json
