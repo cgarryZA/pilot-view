@@ -23,8 +23,6 @@ const OPACITY = {
   carBoxWarnEdge: 1.0,
 };
 
-const CAR_MODEL_URL = '/static/assets/models/gallardo.glb';
-
 // Clearance keys that map to a wall face and a car face.
 const SIDES = ['front', 'rear', 'left', 'right', 'ceiling'];
 
@@ -253,55 +251,75 @@ export function createScene(container) {
   }
   rebuildCarBox(car.extent);
 
-  // ─── load GLB ───
+  // ─── GLB loading (swappable per vehicle) ───
   const loader = new GLTFLoader();
-  loader.load(
-    CAR_MODEL_URL,
-    (gltf) => {
-      const model = gltf.scene;
+  let currentModelUrl = null;
 
-      // Normalise scale so longest dimension = Gallardo length (4.30m)
-      const tempBox = new THREE.Box3().setFromObject(model);
-      const size = new THREE.Vector3();
-      tempBox.getSize(size);
-      const longest = Math.max(size.x, size.y, size.z);
-      const scale = 4.30 / longest;
-      model.scale.setScalar(scale);
+  function loadCarModel(url) {
+    if (!url || url === currentModelUrl) return;
+    currentModelUrl = url;
 
-      // Centre on origin, sit on floor
-      const scaledBox = new THREE.Box3().setFromObject(model);
-      const centre = new THREE.Vector3();
-      scaledBox.getCenter(centre);
-      model.position.sub(centre);
-      const newBox = new THREE.Box3().setFromObject(model);
-      const yShift = -newBox.min.y - car.extent.height / 2;
-      model.position.y += yShift;
-      // Now model sits at y=0..height with centroid at height/2 (matches our car.group convention).
-
-      // Replace materials with wireframe edges
-      const wfGroup = new THREE.Group();
-      model.traverse((obj) => {
-        if (obj.isMesh) {
-          const edges = new THREE.EdgesGeometry(obj.geometry, 22);
-          const wf = new THREE.LineSegments(edges, car.meshMaterial);
-          obj.updateWorldMatrix(true, false);
-          wf.applyMatrix4(obj.matrixWorld);
-          wfGroup.add(wf);
-        }
+    // Dispose old mesh
+    if (car.meshGroup) {
+      car.meshHolder.remove(car.meshGroup);
+      car.meshGroup.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose();
       });
-      car.meshHolder.add(wfGroup);
-      car.meshGroup = wfGroup;
-      car.loaded = true;
-      console.info('[scene] gallardo loaded');
-    },
-    (progress) => {
-      if (progress.total) {
-        const pct = Math.round((progress.loaded / progress.total) * 100);
-        if (pct % 25 === 0) console.info(`[scene] gallardo loading ${pct}%`);
-      }
-    },
-    (err) => console.error('[scene] gallardo failed', err)
-  );
+      car.meshGroup = null;
+    }
+    car.loaded = false;
+
+    loader.load(
+      url,
+      (gltf) => {
+        // Skip if a newer swap has happened in the meantime.
+        if (url !== currentModelUrl) return;
+
+        const model = gltf.scene;
+        const targetLength = car.extent?.length || 4.30;
+        const targetHeight = car.extent?.height || 1.16;
+
+        // Normalise scale so longest dimension = target length
+        const tempBox = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3();
+        tempBox.getSize(size);
+        const longest = Math.max(size.x, size.y, size.z);
+        const scale = targetLength / longest;
+        model.scale.setScalar(scale);
+
+        // Centre on origin, sit so centroid is at targetHeight/2
+        const scaledBox = new THREE.Box3().setFromObject(model);
+        const centre = new THREE.Vector3();
+        scaledBox.getCenter(centre);
+        model.position.sub(centre);
+        const newBox = new THREE.Box3().setFromObject(model);
+        const yShift = -newBox.min.y - targetHeight / 2;
+        model.position.y += yShift;
+
+        const wfGroup = new THREE.Group();
+        model.traverse((obj) => {
+          if (obj.isMesh) {
+            const edges = new THREE.EdgesGeometry(obj.geometry, 22);
+            const wf = new THREE.LineSegments(edges, car.meshMaterial);
+            obj.updateWorldMatrix(true, false);
+            wf.applyMatrix4(obj.matrixWorld);
+            wfGroup.add(wf);
+          }
+        });
+        car.meshHolder.add(wfGroup);
+        car.meshGroup = wfGroup;
+        car.loaded = true;
+        console.info(`[scene] model loaded: ${url}`);
+      },
+      (progress) => {
+        if (progress.total) {
+          const pct = Math.round((progress.loaded / progress.total) * 100);
+          if (pct % 25 === 0) console.info(`[scene] model ${url} loading ${pct}%`);
+        }
+      },
+      (err) => console.error(`[scene] model ${url} failed`, err)
+    );
+  }
 
   // ─── per-frame wall opacity (orbit mode) ───
   function updateWallOpacities() {
@@ -401,21 +419,32 @@ export function createScene(container) {
     }
   }
 
-  function applyCalibration(cal) {
-    if (!cal) return;
+  function applyActiveVehicle(v) {
+    if (!v) return;
 
-    // Vehicle mesh transform (relative to bounding box)
-    if (cal.vehicle) {
-      const off = cal.vehicle.model_offset || { x: 0, y: 0, z: 0 };
-      car.meshHolder.position.set(off.x || 0, off.y || 0, off.z || 0);
-      const yawDeg = cal.vehicle.model_yaw_deg || 0;
-      car.meshHolder.rotation.y = (yawDeg * Math.PI) / 180;
-      const s = cal.vehicle.model_scale || 1;
-      const sx = cal.vehicle.model_mirror_x ? -s : s;
-      car.meshHolder.scale.set(sx, s, s);
+    if (v.model_url) loadCarModel(v.model_url);
+
+    if (v.extent) {
+      const e = v.extent;
+      if (e.length !== car.extent.length || e.width !== car.extent.width || e.height !== car.extent.height) {
+        car.extent = { ...e };
+        rebuildCarBox(car.extent);
+      }
     }
 
-    // Live camera position / look-at / FOV
+    const off = v.model_offset || { x: 0, y: 0, z: 0 };
+    car.meshHolder.position.set(off.x || 0, off.y || 0, off.z || 0);
+    const yawDeg = v.model_yaw_deg || 0;
+    car.meshHolder.rotation.y = (yawDeg * Math.PI) / 180;
+    const s = v.model_scale || 1;
+    const sx = v.model_mirror_x ? -s : s;
+    car.meshHolder.scale.set(sx, s, s);
+  }
+
+  function applyCalibration(cal) {
+    if (!cal) return;
+    // Vehicle-specific things live in applyActiveVehicle.
+    // applyCalibration only handles things tied to the whole scene.
     if (cal.live_view) {
       const lv = cal.live_view;
       if (lv.camera_position) {
@@ -438,5 +467,12 @@ export function createScene(container) {
     renderer.domElement.remove();
   }
 
-  return { applyGeometry, applyCalibration, setMode, destroy, get mode() { return mode; } };
+  return {
+    applyGeometry,
+    applyCalibration,
+    applyActiveVehicle,
+    setMode,
+    destroy,
+    get mode() { return mode; },
+  };
 }

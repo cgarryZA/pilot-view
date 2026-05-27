@@ -33,6 +33,7 @@ export function createCalibration({ scene, panel, onChange }) {
 
   let current = null;
   let inputs = [];
+  let activeVehicleId = null;
 
   function bindInputs() {
     inputs = Array.from(panel.querySelectorAll('input[data-path]'));
@@ -42,21 +43,36 @@ export function createCalibration({ scene, panel, onChange }) {
     }
   }
 
+  // Form data-paths use "vehicle.X" — translate to the actual location in
+  // calibration's vehicles.registry.<active>.X.
+  function translatePath(path) {
+    if (path.startsWith('vehicle.') && activeVehicleId) {
+      return `vehicles.registry.${activeVehicleId}.${path.slice('vehicle.'.length)}`;
+    }
+    return path;
+  }
+
   function renderValues(cal) {
     current = cal;
     for (const input of inputs) {
-      const v = getPath(cal, input.dataset.path);
+      const v = getPath(cal, translatePath(input.dataset.path));
       if (input.type === 'checkbox') {
         input.checked = !!v;
       } else if (typeof v === 'number') {
-        // Avoid clobbering the input while the user is typing.
         if (document.activeElement !== input) {
           input.value = String(v);
         }
       }
     }
     if (scene) scene.applyCalibration(cal);
+    pushActiveVehicleToScene(cal);
     if (onChange) onChange(cal);
+  }
+
+  function pushActiveVehicleToScene(cal) {
+    if (!scene || !activeVehicleId) return;
+    const v = cal?.vehicles?.registry?.[activeVehicleId];
+    if (v) scene.applyActiveVehicle(v);
   }
 
   function onInputChanged(input) {
@@ -74,10 +90,11 @@ export function createCalibration({ scene, panel, onChange }) {
     }
 
     const next = JSON.parse(JSON.stringify(current));
-    setPath(next, input.dataset.path, value);
+    setPath(next, translatePath(input.dataset.path), value);
     current = next;
 
     if (scene) scene.applyCalibration(current);
+    pushActiveVehicleToScene(current);
     if (onChange) onChange(current);
     scheduleSave();
   }
@@ -101,7 +118,6 @@ export function createCalibration({ scene, panel, onChange }) {
     showSaved.timer = setTimeout(() => savedEl.classList.remove('visible'), 1200);
   }
 
-  // ─── Tab switching ───
   tabsEl.addEventListener('click', (e) => {
     const tab = e.target.closest('.calib-tab');
     if (!tab) return;
@@ -114,12 +130,10 @@ export function createCalibration({ scene, panel, onChange }) {
     }
   });
 
-  // ─── Close button → leave calibration mode ───
   closeEl.addEventListener('click', () => {
     document.dispatchEvent(new CustomEvent('app-mode', { detail: 'overview' }));
   });
 
-  // ─── Reset to defaults ───
   resetEl.addEventListener('click', async () => {
     try {
       const res = await fetch('/api/calibration/reset', { method: 'POST' });
@@ -133,7 +147,6 @@ export function createCalibration({ scene, panel, onChange }) {
     }
   });
 
-  // ─── Initial load ───
   async function load() {
     try {
       const res = await fetch('/api/calibration');
@@ -146,8 +159,18 @@ export function createCalibration({ scene, panel, onChange }) {
     }
   }
 
+  function setActiveVehicle(id) {
+    if (id === activeVehicleId) return;
+    activeVehicleId = id;
+    if (current) renderValues(current);
+  }
+
   bindInputs();
   load();
 
-  return { reload: load, current: () => current };
+  return {
+    reload: load,
+    setActiveVehicle,
+    current: () => current,
+  };
 }

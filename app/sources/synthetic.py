@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from app import calibration
 from app.sources.base import CameraSource
+from app.vehicles import vehicles
 
 
 def _classify(clearances: dict[str, float], thresholds: dict[str, float]) -> str:
@@ -24,8 +25,12 @@ class SyntheticSource(CameraSource):
     def state(self) -> dict:
         cal = calibration.load()
         garage = cal["garage"]
-        car = cal["vehicle"]["extent"]
         thresholds = cal["thresholds"]
+
+        active_vehicle = vehicles.state_dict().get("active") or {}
+        car = active_vehicle.get("extent") or {
+            "length": 4.30, "width": 1.90, "height": 1.16
+        }
 
         t = time.monotonic() - self._t0
 
@@ -71,7 +76,6 @@ class SyntheticSource(CameraSource):
                         "width": car["width"],
                         "height": car["height"],
                     },
-                    "model": "lamborghini_gallardo",
                 },
                 "clearances": clearances,
                 "thresholds": {

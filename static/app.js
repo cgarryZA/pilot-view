@@ -11,6 +11,8 @@ const els = {
   cameraPill: $('camera-pill'),
   doorPill: $('door-pill'),
   lightsPill: $('lights-pill'),
+  vehiclePill: $('vehicle-pill'),
+  batteryPill: $('battery-pill'),
   tempPill: $('temp-pill'),
   humidityPill: $('humidity-pill'),
 
@@ -193,12 +195,107 @@ function applyEnvPill(pill, value, unit, thresholds) {
 }
 
 let currentCalibration = null;
+let activeVehicleId = null;
+let vehicleDriverName = null;
 
 function applyEnvironment(env) {
   const t = currentCalibration?.environment?.temperature;
   const h = currentCalibration?.environment?.humidity;
   applyEnvPill(els.tempPill, env?.temperature_c, ' °C', t);
   applyEnvPill(els.humidityPill, env?.humidity_pct, '%', h);
+}
+
+const VEHICLE_STATE_CLASSES = ['vehicle-known', 'vehicle-unknown'];
+
+function applyVehicleState(v) {
+  const pill = els.vehiclePill;
+  const dot = pill.querySelector('.dot');
+  const text = pill.querySelector('.pill-text');
+  clearClasses(pill, VEHICLE_STATE_CLASSES);
+  clearClasses(dot, DOT_CLASSES);
+
+  vehicleDriverName = v?.driver || null;
+  const known = !!v?.active_id;
+
+  if (known) {
+    pill.classList.add('vehicle-known');
+    dot.classList.add('dot-online');
+    const name = v.active?.name || v.active_id;
+    text.textContent = name;
+  } else {
+    pill.classList.add('vehicle-unknown');
+    dot.classList.add('dot-offline');
+    text.textContent = 'Vehicle · unknown';
+  }
+
+  // Only synthetic mode lets you click to cycle.
+  pill.disabled = vehicleDriverName !== 'synthetic';
+  pill.style.cursor = vehicleDriverName === 'synthetic' ? 'pointer' : 'default';
+
+  // Notify calibration if active vehicle changed
+  if (v?.active_id !== activeVehicleId) {
+    activeVehicleId = v?.active_id || null;
+    if (calib && calib.setActiveVehicle) calib.setActiveVehicle(activeVehicleId);
+  }
+}
+
+async function cycleVehicle() {
+  if (vehicleDriverName !== 'synthetic') return;
+  try {
+    await fetch('/api/vehicles/cycle', { method: 'POST' });
+  } catch (err) {
+    console.error('[vehicles] cycle failed', err);
+  }
+}
+
+els.vehiclePill.addEventListener('click', cycleVehicle);
+
+const BATTERY_STATE_CLASSES = [
+  'battery-safe', 'battery-warn', 'battery-danger',
+  'battery-charging', 'battery-unavailable',
+];
+
+function applyBatteryState(b) {
+  const pill = els.batteryPill;
+  const dot = pill.querySelector('.dot');
+  const text = pill.querySelector('.pill-text');
+  clearClasses(pill, BATTERY_STATE_CLASSES);
+  clearClasses(dot, DOT_CLASSES);
+
+  // No battery for active vehicle → hide the pill entirely (don't take topbar space).
+  if (!b) {
+    pill.style.display = 'none';
+    return;
+  }
+  pill.style.display = '';
+
+  if (!b.available || b.voltage_v == null) {
+    pill.classList.add('battery-unavailable');
+    dot.classList.add('dot-offline');
+    text.textContent = '— V';
+    return;
+  }
+
+  const v = b.voltage_v;
+  const thresholds = currentCalibration?.battery || { warn_low_v: 12.4, danger_low_v: 12.0 };
+
+  if (b.charging) {
+    pill.classList.add('battery-charging');
+    text.textContent = `${v.toFixed(2)} V · charging`;
+    return;
+  }
+
+  if (v < thresholds.danger_low_v) {
+    pill.classList.add('battery-danger');
+    dot.classList.add('dot-danger');
+  } else if (v < thresholds.warn_low_v) {
+    pill.classList.add('battery-warn');
+    dot.classList.add('dot-warn');
+  } else {
+    pill.classList.add('battery-safe');
+    dot.classList.add('dot-online');
+  }
+  text.textContent = `${v.toFixed(2)} V`;
 }
 
 function classifyClearance(value, thresholds) {
@@ -313,6 +410,15 @@ function applyState(payload) {
 
   // Environment pills
   applyEnvironment(payload.environment);
+
+  // Vehicle + battery
+  applyVehicleState(payload.vehicles);
+  applyBatteryState(payload.battery);
+
+  // If active vehicle data is present, push into scene (handles GLB swap + per-vehicle transform)
+  if (scene && payload.vehicles?.active) {
+    scene.applyActiveVehicle(payload.vehicles.active);
+  }
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';

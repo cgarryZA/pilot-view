@@ -285,6 +285,51 @@ body {
   border-style: dashed;
 }
 
+.pill.vehicle-known {
+  color: var(--accent);
+  border-color: var(--accent-glow);
+}
+
+.pill.vehicle-unknown {
+  color: var(--muted);
+  border-style: dashed;
+}
+
+.pill.battery-safe { color: var(--text); }
+.pill.battery-warn { color: var(--warn); border-color: rgba(255, 200, 87, 0.5); }
+.pill.battery-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+  box-shadow: 0 0 8px var(--danger-glow);
+}
+
+.pill.battery-charging {
+  color: var(--ok);
+  border-color: rgba(74, 222, 128, 0.65);
+  animation: charging-glow 1.6s ease-in-out infinite;
+}
+
+.pill.battery-charging .dot {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+  animation: charging-dot 1.0s ease-in-out infinite;
+}
+
+.pill.battery-unavailable {
+  color: var(--dim);
+  border-style: dashed;
+}
+
+@keyframes charging-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(74, 222, 128, 0.4); }
+  50% { box-shadow: 0 0 16px rgba(74, 222, 128, 0.85); }
+}
+
+@keyframes charging-dot {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.7; }
+}
+
 .dot-warn {
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn);
@@ -956,9 +1001,13 @@ body {
   .topbar-right .pill { padding: 8px; }
   /* Value pills always show their reading */
   .topbar-right #temp-pill .pill-text,
-  .topbar-right #humidity-pill .pill-text { display: inline; }
+  .topbar-right #humidity-pill .pill-text,
+  .topbar-right #battery-pill .pill-text,
+  .topbar-right #vehicle-pill .pill-text { display: inline; }
   .topbar-right #temp-pill,
-  .topbar-right #humidity-pill { padding: 7px 10px; }
+  .topbar-right #humidity-pill,
+  .topbar-right #battery-pill,
+  .topbar-right #vehicle-pill { padding: 7px 10px; }
 
   .stage-card { margin: 16px auto; padding: 22px; }
   .stage-headline { font-size: 18px; letter-spacing: 0.24em; }

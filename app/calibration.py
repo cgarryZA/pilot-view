@@ -8,14 +8,46 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_FILE = CONFIG_DIR / "calibration.json"
 
-DEFAULTS: dict[str, Any] = {
-    "garage": {"width": 3.0, "length": 5.8, "height": 2.3},
-    "vehicle": {
-        "extent": {"length": 4.30, "width": 1.90, "height": 1.16},
+def _vehicle_defaults(
+    name: str,
+    model_url: str,
+    extent: dict,
+    mirror_x: bool = False,
+    beacon_id: str = "",
+    battery_monitor_mac: str = "",
+) -> dict:
+    return {
+        "name": name,
+        "model_url": model_url,
+        "extent": extent,
         "model_offset": {"x": 0.0, "y": 0.0, "z": 0.0},
         "model_yaw_deg": 0.0,
         "model_scale": 1.0,
-        "model_mirror_x": False,  # set True when GLB is LHD but car is RHD (or vice versa)
+        "model_mirror_x": mirror_x,
+        "beacon_id": beacon_id,
+        "battery_monitor_mac": battery_monitor_mac,
+    }
+
+
+DEFAULTS: dict[str, Any] = {
+    "garage": {"width": 3.0, "length": 5.8, "height": 2.3},
+    "vehicles": {
+        "active_id": "lambo",
+        "registry": {
+            "lambo": _vehicle_defaults(
+                name="Lamborghini Gallardo",
+                model_url="/static/assets/models/gallardo.glb",
+                extent={"length": 4.30, "width": 1.90, "height": 1.16},
+                # Set so synthetic battery monitor is visible for the Lambo
+                # (set to actual BM2 MAC when device arrives).
+                battery_monitor_mac="synthetic-lambo",
+            ),
+            "mazda": _vehicle_defaults(
+                name="Mazda",
+                model_url="/static/assets/models/mazda.glb",
+                extent={"length": 4.07, "width": 1.70, "height": 1.51},
+            ),
+        },
     },
     "live_view": {
         "camera_position": {"x": 0.0, "y": 1.45, "z": 5.6},
@@ -26,6 +58,11 @@ DEFAULTS: dict[str, Any] = {
     "environment": {
         "temperature": {"warn_low": 5.0, "warn_high": 30.0},
         "humidity": {"warn_low": 25.0, "warn_high": 70.0},
+    },
+    "battery": {
+        "warn_low_v": 12.4,
+        "danger_low_v": 12.0,
+        "charging_v": 13.4,
     },
 }
 

@@ -6,10 +6,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import automations, calibration
+from app.battery_monitor import battery_monitor
 from app.door import door
 from app.lights import lights
 from app.sensors import sensors
 from app.sources import make_source
+from app.vehicles import vehicles
 
 automations.install()
 
@@ -94,11 +96,44 @@ def get_environment():
     return sensors.read()
 
 
+@app.get("/api/vehicles")
+def get_vehicles():
+    return vehicles.state_dict()
+
+
+@app.post("/api/vehicles/cycle")
+def cycle_vehicle():
+    return vehicles.cycle_active()
+
+
+@app.post("/api/vehicles/active")
+async def set_active_vehicle(payload: dict):
+    if not isinstance(payload, dict) or "id" not in payload:
+        raise HTTPException(400, "expected {'id': '<vehicle_id>'}")
+    return vehicles.set_active(payload["id"])
+
+
 def _ws_payload() -> dict:
     payload = source.state()
     payload["door"] = door.status_dict()
     payload["lights"] = lights.status_dict()
     payload["environment"] = sensors.read()
+
+    vstate = vehicles.state_dict()
+    payload["vehicles"] = vstate
+
+    active = vstate.get("active") or {}
+    mac = active.get("battery_monitor_mac")
+    if mac and vstate.get("active_id"):
+        reading = battery_monitor.read(vstate["active_id"], mac)
+        if reading and reading.get("available"):
+            reading["vehicle_id"] = vstate["active_id"]
+            payload["battery"] = reading
+        else:
+            payload["battery"] = None
+    else:
+        payload["battery"] = None
+
     return payload
 
 
