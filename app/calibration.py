@@ -40,13 +40,11 @@ DEFAULTS: dict[str, Any] = {
         "registry": {
             "lambo": _vehicle_defaults(
                 name="Lamborghini Gallardo",
+                # Canonical Lambo = the 70% decimated variant.
                 model_url="/static/assets/models/gallardo.glb",
                 extent={"length": 4.30, "width": 1.90, "height": 1.16},
-                # Set so synthetic battery monitor is visible for the Lambo
-                # (set to actual BM2 MAC when device arrives).
                 battery_monitor_mac="synthetic-lambo",
-                # Available decimated meshes; cycler picks one (still TBD).
-                mesh_variants=["70", "50", "30", "10", "3"],
+                mesh_variants=[],
             ),
             "mazda": _vehicle_defaults(
                 name="Mazda",

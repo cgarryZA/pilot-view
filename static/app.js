@@ -16,7 +16,6 @@ const els = {
   batteryPill: $('battery-pill'),
   tempPill: $('temp-pill'),
   humidityPill: $('humidity-pill'),
-  qualityPill: $('quality-pill'),
   authOverlay: $('auth-overlay'),
   authHeadline: $('auth-headline'),
   authSub: $('auth-sub'),
@@ -183,92 +182,10 @@ async function toggleLights() {
 els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
 
-// ─── Temporary: mesh quality cycler (for picking decimation ratio) ───
-// Per-vehicle quality cycle. We compute the active list from the vehicle's
-// mesh_variants — vehicles with an empty list are "locked" and the pill shows
-// (locked) instead of cycling.
-function qualityLevelsForActive() {
-  const variants = currentActiveVehicle?.mesh_variants || [];
-  if (variants.length === 0) return [{ id: 'original', label: 'Locked' }];
-  return [
-    { id: 'original', label: 'Original' },
-    ...variants.map((v) => ({ id: v, label: `${v}%` })),
-  ];
-}
-
-const QUALITY_STORAGE_KEY = 'pilot-view.vehicle-quality';
-
-function loadQualityPrefs() {
-  try {
-    const raw = localStorage.getItem(QUALITY_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveQualityPrefs(prefs) {
-  try {
-    localStorage.setItem(QUALITY_STORAGE_KEY, JSON.stringify(prefs));
-  } catch {}
-}
-
-let qualityByVehicle = loadQualityPrefs();
 let currentActiveVehicle = null;
 
-function qualityFor(vid) {
-  return qualityByVehicle[vid] || 'original';
-}
-
-function applyQualityToUrl(url, qualityId) {
-  if (!url || qualityId === 'original') return url;
-  return url.replace(/\.glb$/i, `_${qualityId}.glb`);
-}
-
-function applyEffectiveActiveVehicle() {
-  if (!scene || !currentActiveVehicle) return;
-  const variants = currentActiveVehicle.mesh_variants || [];
-  const stored = qualityFor(activeVehicleId);
-  // Validate stored choice against this vehicle's actual variants — a Mazda with
-  // no variants would otherwise build mazda_10.glb (404) if localStorage still
-  // remembers a Lambo-era choice.
-  const valid = stored === 'original' || variants.includes(stored);
-  const effectiveQuality = valid ? stored : 'original';
-  const url = applyQualityToUrl(currentActiveVehicle.model_url, effectiveQuality);
-  scene.applyActiveVehicle({ ...currentActiveVehicle, model_url: url });
-}
-
-function updateQualityPill() {
-  const text = els.qualityPill.querySelector('.pill-text');
-  if (!activeVehicleId) {
-    els.qualityPill.classList.remove('quality-pill');
-    text.textContent = 'Quality · —';
-    els.qualityPill.disabled = true;
-    return;
-  }
-  els.qualityPill.classList.add('quality-pill');
-  const levels = qualityLevelsForActive();
-  const qId = qualityFor(activeVehicleId);
-  const level = levels.find((l) => l.id === qId) || levels[0];
-  const vname = currentActiveVehicle?.name || activeVehicleId;
-  text.textContent = `Quality · ${vname} · ${level.label}`;
-  // Only allow clicks if there's more than one option.
-  els.qualityPill.disabled = levels.length <= 1;
-  els.qualityPill.style.opacity = levels.length <= 1 ? '0.6' : '';
-}
-
-function cycleQuality() {
-  if (!activeVehicleId) return;
-  const levels = qualityLevelsForActive();
-  if (levels.length <= 1) return;
-  const current = qualityFor(activeVehicleId);
-  const idx = levels.findIndex((l) => l.id === current);
-  const next = levels[(idx + 1) % levels.length];
-  qualityByVehicle[activeVehicleId] = next.id;
-  saveQualityPrefs(qualityByVehicle);
-  applyEffectiveActiveVehicle();
-  updateQualityPill();
-}
-
-els.qualityPill.addEventListener('click', cycleQuality);
+// Drop any stale quality-cycler preferences from when the temporary pill existed.
+try { localStorage.removeItem('pilot-view.vehicle-quality'); } catch {}
 
 const ENV_STATE_CLASSES = ['env-safe', 'env-warn', 'env-unavailable'];
 
@@ -646,12 +563,10 @@ function applyState(payload) {
   applyVehicleState(payload.vehicles);
   applyBatteryState(payload.battery);
 
-  // Cache latest active vehicle so the quality-pill cycler can re-apply with a different mesh URL.
   if (payload.vehicles?.active) {
     currentActiveVehicle = payload.vehicles.active;
-    applyEffectiveActiveVehicle();
+    if (scene) scene.applyActiveVehicle(currentActiveVehicle);
   }
-  updateQualityPill();
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';
