@@ -15,6 +15,7 @@ const els = {
   batteryPill: $('battery-pill'),
   tempPill: $('temp-pill'),
   humidityPill: $('humidity-pill'),
+  qualityPill: $('quality-pill'),
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
@@ -172,6 +173,75 @@ async function toggleLights() {
 
 els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
+
+// ─── Temporary: mesh quality cycler (for picking decimation ratio) ───
+const QUALITY_LEVELS = [
+  { id: 'original', label: 'Original' },
+  { id: '30', label: '30%' },
+  { id: '10', label: '10%' },
+  { id: '3', label: '3%' },
+];
+
+const QUALITY_STORAGE_KEY = 'pilot-view.vehicle-quality';
+
+function loadQualityPrefs() {
+  try {
+    const raw = localStorage.getItem(QUALITY_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveQualityPrefs(prefs) {
+  try {
+    localStorage.setItem(QUALITY_STORAGE_KEY, JSON.stringify(prefs));
+  } catch {}
+}
+
+let qualityByVehicle = loadQualityPrefs();
+let currentActiveVehicle = null;
+
+function qualityFor(vid) {
+  return qualityByVehicle[vid] || 'original';
+}
+
+function applyQualityToUrl(url, qualityId) {
+  if (!url || qualityId === 'original') return url;
+  return url.replace(/\.glb$/i, `_${qualityId}.glb`);
+}
+
+function applyEffectiveActiveVehicle() {
+  if (!scene || !currentActiveVehicle) return;
+  const qId = qualityFor(activeVehicleId);
+  const url = applyQualityToUrl(currentActiveVehicle.model_url, qId);
+  scene.applyActiveVehicle({ ...currentActiveVehicle, model_url: url });
+}
+
+function updateQualityPill() {
+  const text = els.qualityPill.querySelector('.pill-text');
+  if (!activeVehicleId) {
+    els.qualityPill.classList.remove('quality-pill');
+    text.textContent = 'Quality · —';
+    return;
+  }
+  els.qualityPill.classList.add('quality-pill');
+  const qId = qualityFor(activeVehicleId);
+  const level = QUALITY_LEVELS.find((l) => l.id === qId) || QUALITY_LEVELS[0];
+  const vname = currentActiveVehicle?.name || activeVehicleId;
+  text.textContent = `Quality · ${vname} · ${level.label}`;
+}
+
+function cycleQuality() {
+  if (!activeVehicleId) return;
+  const current = qualityFor(activeVehicleId);
+  const idx = QUALITY_LEVELS.findIndex((l) => l.id === current);
+  const next = QUALITY_LEVELS[(idx + 1) % QUALITY_LEVELS.length];
+  qualityByVehicle[activeVehicleId] = next.id;
+  saveQualityPrefs(qualityByVehicle);
+  applyEffectiveActiveVehicle();
+  updateQualityPill();
+}
+
+els.qualityPill.addEventListener('click', cycleQuality);
 
 const ENV_STATE_CLASSES = ['env-safe', 'env-warn', 'env-unavailable'];
 
@@ -549,10 +619,12 @@ function applyState(payload) {
   applyVehicleState(payload.vehicles);
   applyBatteryState(payload.battery);
 
-  // If active vehicle data is present, push into scene (handles GLB swap + per-vehicle transform)
-  if (scene && payload.vehicles?.active) {
-    scene.applyActiveVehicle(payload.vehicles.active);
+  // Cache latest active vehicle so the quality-pill cycler can re-apply with a different mesh URL.
+  if (payload.vehicles?.active) {
+    currentActiveVehicle = payload.vehicles.active;
+    applyEffectiveActiveVehicle();
   }
+  updateQualityPill();
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';

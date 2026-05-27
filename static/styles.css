@@ -290,6 +290,11 @@ body {
   border-color: var(--accent-glow);
 }
 
+.pill.quality-pill {
+  color: var(--accent);
+  border-style: dashed;
+}
+
 .pill.vehicle-unknown {
   color: var(--muted);
   border-style: dashed;
@@ -1083,11 +1088,13 @@ body {
   .topbar-right #temp-pill .pill-text,
   .topbar-right #humidity-pill .pill-text,
   .topbar-right #battery-pill .pill-text,
-  .topbar-right #vehicle-pill .pill-text { display: inline; }
+  .topbar-right #vehicle-pill .pill-text,
+  .topbar-right #quality-pill .pill-text { display: inline; }
   .topbar-right #temp-pill,
   .topbar-right #humidity-pill,
   .topbar-right #battery-pill,
-  .topbar-right #vehicle-pill { padding: 7px 10px; }
+  .topbar-right #vehicle-pill,
+  .topbar-right #quality-pill { padding: 7px 10px; }
 
   .stage-card { margin: 16px auto; padding: 22px; }
   .stage-headline { font-size: 18px; letter-spacing: 0.24em; }
