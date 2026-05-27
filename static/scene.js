@@ -301,9 +301,17 @@ export function createScene(container) {
         model.position.y += yShift;
 
         const wfGroup = new THREE.Group();
+        let triangleCount = 0;
+        let edgeCount = 0;
         model.traverse((obj) => {
           if (obj.isMesh) {
+            if (obj.geometry.index) {
+              triangleCount += obj.geometry.index.count / 3;
+            } else if (obj.geometry.attributes?.position) {
+              triangleCount += obj.geometry.attributes.position.count / 3;
+            }
             const edges = new THREE.EdgesGeometry(obj.geometry, 22);
+            edgeCount += edges.attributes.position.count / 2;
             const wf = new THREE.LineSegments(edges, car.meshMaterial);
             obj.updateWorldMatrix(true, false);
             wf.applyMatrix4(obj.matrixWorld);
@@ -313,7 +321,7 @@ export function createScene(container) {
         car.meshHolder.add(wfGroup);
         car.meshGroup = wfGroup;
         car.loaded = true;
-        console.info(`[scene] model loaded: ${url}`);
+        console.info(`[scene] loaded ${url}: ~${Math.round(triangleCount)} triangles, ~${Math.round(edgeCount)} wireframe edges`);
       },
       (progress) => {
         if (progress.total) {
