@@ -223,28 +223,28 @@ export function createScene(container) {
     }
     garage.width = w; garage.length = l; garage.height = h;
 
-    // Re-position live camera at the back-wall eye-level looking toward the entrance.
-    liveCamera.position.set(0, h * 0.65, l - 0.2);
-    liveCamera.lookAt(0, h * 0.28, 0);
-
-    // Update orbit controls target
+    // Orbit camera default target = middle of garage interior (liveCamera position
+    // is owned by calibration, see applyCalibration).
     controls.target.set(0, h * 0.28, l / 2);
-    if (mode === 'orbit') {
-      orbitCamera.position.copy(liveCamera.position);
-      controls.update();
-    }
+    if (mode === 'orbit') controls.update();
   }
 
   // ─── car state ───
+  // car.group = positioned by detection data (centred on detected car centroid at z=0)
+  //   ├─ car.box.group = bounding box (per-face outlines)
+  //   └─ car.meshHolder = sub-group for the GLB; calibration applies to this transform
+  //         └─ car.meshGroup = the actual wireframe LineSegments
   const car = {
     group: new THREE.Group(),
     box: null,          // {group, faces}
+    meshHolder: new THREE.Group(),
     meshGroup: null,    // wireframe edges of GLB
     meshMaterial: new THREE.LineBasicMaterial({ color: COLOR.carMesh, transparent: true, opacity: 0.9 }),
     loaded: false,
     extent: { length: 4.30, width: 1.90, height: 1.16 },
   };
   scene.add(car.group);
+  car.group.add(car.meshHolder);
 
   function rebuildCarBox(extent) {
     if (car.box) car.group.remove(car.box.group);
@@ -289,7 +289,7 @@ export function createScene(container) {
           wfGroup.add(wf);
         }
       });
-      car.group.add(wfGroup);
+      car.meshHolder.add(wfGroup);
       car.meshGroup = wfGroup;
       car.loaded = true;
       console.info('[scene] gallardo loaded');
@@ -401,6 +401,35 @@ export function createScene(container) {
     }
   }
 
+  function applyCalibration(cal) {
+    if (!cal) return;
+
+    // Vehicle mesh transform (relative to bounding box)
+    if (cal.vehicle) {
+      const off = cal.vehicle.model_offset || { x: 0, y: 0, z: 0 };
+      car.meshHolder.position.set(off.x || 0, off.y || 0, off.z || 0);
+      const yawDeg = cal.vehicle.model_yaw_deg || 0;
+      car.meshHolder.rotation.y = (yawDeg * Math.PI) / 180;
+      const s = cal.vehicle.model_scale || 1;
+      car.meshHolder.scale.setScalar(s);
+    }
+
+    // Live camera position / look-at / FOV
+    if (cal.live_view) {
+      const lv = cal.live_view;
+      if (lv.camera_position) {
+        liveCamera.position.set(lv.camera_position.x, lv.camera_position.y, lv.camera_position.z);
+      }
+      if (lv.camera_look_at) {
+        liveCamera.lookAt(lv.camera_look_at.x, lv.camera_look_at.y, lv.camera_look_at.z);
+      }
+      if (lv.camera_fov_deg != null) {
+        liveCamera.fov = lv.camera_fov_deg;
+        liveCamera.updateProjectionMatrix();
+      }
+    }
+  }
+
   function destroy() {
     running = false;
     ro.disconnect();
@@ -408,5 +437,5 @@ export function createScene(container) {
     renderer.domElement.remove();
   }
 
-  return { applyGeometry, setMode, destroy, get mode() { return mode; } };
+  return { applyGeometry, applyCalibration, setMode, destroy, get mode() { return mode; } };
 }

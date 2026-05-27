@@ -1,4 +1,5 @@
 import { createScene } from '/static/scene.js';
+import { createCalibration } from '/static/calibration.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,6 +15,10 @@ const els = {
   sceneBackground: $('scene-background'),
   sceneCanvas: $('scene-canvas'),
   viewToggle: $('view-toggle'),
+  calibPanel: $('calib-panel'),
+  pageTitle: $('page-title'),
+  pageSubtitle: $('page-subtitle'),
+  nav: $('nav'),
 
   camModel: $('cam-model'),
   camIface: $('cam-iface'),
@@ -82,13 +87,16 @@ function classifyClearance(value, thresholds) {
 
 // ─── Scene lifecycle ─────────────────────────────────
 let scene = null;
+let calib = null;
 let viewMode = 'live';
+let appMode = 'overview';
 let currentLiveUrl = null;
 
 function ensureScene() {
   if (scene) return scene;
   scene = createScene(els.sceneCanvas);
   scene.setMode(viewMode);
+  calib = createCalibration({ scene, panel: els.calibPanel });
   return scene;
 }
 
@@ -122,6 +130,33 @@ els.viewToggle.addEventListener('click', (e) => {
   if (!btn) return;
   setViewMode(btn.dataset.mode);
 });
+
+// ─── App-level mode (overview vs calibration) ────────
+const PAGE_META = {
+  overview: { title: 'Overview', subtitle: 'Garage vision & parking assist' },
+  calibration: { title: 'Calibration', subtitle: 'Align scene to real garage & vehicle' },
+};
+
+function setAppMode(next) {
+  if (!PAGE_META[next]) return;
+  if (next === appMode) return;
+  appMode = next;
+  els.connected.dataset.appMode = next;
+  els.pageTitle.textContent = PAGE_META[next].title;
+  els.pageSubtitle.textContent = PAGE_META[next].subtitle;
+  for (const item of els.nav.querySelectorAll('.nav-item')) {
+    item.classList.toggle('active', item.dataset.view === next);
+  }
+}
+
+els.nav.addEventListener('click', (e) => {
+  const item = e.target.closest('.nav-item');
+  if (!item || item.classList.contains('disabled')) return;
+  const view = item.dataset.view;
+  setAppMode(view);
+});
+
+document.addEventListener('app-mode', (e) => setAppMode(e.detail));
 
 function setLiveBackground(url) {
   if (url === currentLiveUrl) return;

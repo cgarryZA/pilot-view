@@ -2,30 +2,15 @@ import math
 import time
 from datetime import datetime, timezone
 
+from app import calibration
 from app.sources.base import CameraSource
 
 
-GARAGE = {
-    "width": 3.0,   # along X (left/right)
-    "length": 5.8,  # along Z (entrance to back wall)
-    "height": 2.3,  # along Y (floor to ceiling)
-}
-
-CAR = {
-    "length": 4.30,
-    "width": 1.90,
-    "height": 1.16,
-}
-
-WARN_THRESHOLD = 0.50  # metres
-DANGER_THRESHOLD = 0.20
-
-
-def _classify(clearances: dict[str, float]) -> str:
+def _classify(clearances: dict[str, float], thresholds: dict[str, float]) -> str:
     smallest = min(clearances.values())
-    if smallest < DANGER_THRESHOLD:
+    if smallest < thresholds["danger"]:
         return "danger"
-    if smallest < WARN_THRESHOLD:
+    if smallest < thresholds["warn"]:
         return "warning"
     return "safe"
 
@@ -37,25 +22,27 @@ class SyntheticSource(CameraSource):
         self._t0 = time.monotonic()
 
     def state(self) -> dict:
+        cal = calibration.load()
+        garage = cal["garage"]
+        car = cal["vehicle"]["extent"]
+        thresholds = cal["thresholds"]
+
         t = time.monotonic() - self._t0
 
-        # Animate car drift toward the back wall on a slow sine wave.
-        # Z = 0 is the entrance plane, Z grows into the garage.
-        # Car centre oscillates between a safe distance and almost-touching.
-        z_safe = CAR["length"] / 2 + 1.2          # comfortably inside
-        z_close = GARAGE["length"] - CAR["length"] / 2 - 0.08  # almost touching
+        z_safe = car["length"] / 2 + 1.2
+        z_close = max(z_safe + 0.4, garage["length"] - car["length"] / 2 - 0.08)
         z_mid = (z_safe + z_close) / 2
         z_amp = (z_close - z_safe) / 2
-        car_z = z_mid + z_amp * math.sin(t * 2 * math.pi / 18)  # 18s period
+        car_z = z_mid + z_amp * math.sin(t * 2 * math.pi / 18)
 
-        # Small lateral wobble so we get side-clearance variation too.
-        car_x = 0.18 * math.sin(t * 2 * math.pi / 11)
+        max_lateral = max(0.0, (garage["width"] / 2 - car["width"] / 2) * 0.6)
+        car_x = max_lateral * math.sin(t * 2 * math.pi / 11)
 
-        car_y = CAR["height"] / 2  # car sits on the floor (centroid at half-height)
-        car_yaw = 0.06 * math.sin(t * 2 * math.pi / 25)  # tiny yaw drift
+        car_y = car["height"] / 2
+        car_yaw = 0.06 * math.sin(t * 2 * math.pi / 25)
 
-        clearances = self._clearances(car_x, car_z)
-        state_label = _classify(clearances)
+        clearances = self._clearances(car_x, car_z, garage, car)
+        state_label = _classify(clearances, thresholds)
 
         return {
             "source": self.name,
@@ -72,36 +59,36 @@ class SyntheticSource(CameraSource):
             },
             "geometry": {
                 "garage": {
-                    "width": GARAGE["width"],
-                    "length": GARAGE["length"],
-                    "height": GARAGE["height"],
+                    "width": garage["width"],
+                    "length": garage["length"],
+                    "height": garage["height"],
                 },
                 "car": {
                     "position": {"x": car_x, "y": car_y, "z": car_z},
                     "yaw": car_yaw,
                     "extent": {
-                        "length": CAR["length"],
-                        "width": CAR["width"],
-                        "height": CAR["height"],
+                        "length": car["length"],
+                        "width": car["width"],
+                        "height": car["height"],
                     },
                     "model": "lamborghini_gallardo",
                 },
                 "clearances": clearances,
                 "thresholds": {
-                    "warn": WARN_THRESHOLD,
-                    "danger": DANGER_THRESHOLD,
+                    "warn": thresholds["warn"],
+                    "danger": thresholds["danger"],
                 },
                 "state": state_label,
             },
         }
 
-    def _clearances(self, car_x: float, car_z: float) -> dict[str, float]:
-        half_l = CAR["length"] / 2
-        half_w = CAR["width"] / 2
+    def _clearances(self, car_x, car_z, garage, car) -> dict[str, float]:
+        half_l = car["length"] / 2
+        half_w = car["width"] / 2
         return {
-            "front": GARAGE["length"] - (car_z + half_l),
+            "front": garage["length"] - (car_z + half_l),
             "rear": car_z - half_l,
-            "left": (GARAGE["width"] / 2) + car_x - half_w,
-            "right": (GARAGE["width"] / 2) - car_x - half_w,
-            "ceiling": GARAGE["height"] - CAR["height"],
+            "left": (garage["width"] / 2) + car_x - half_w,
+            "right": (garage["width"] / 2) - car_x - half_w,
+            "ceiling": garage["height"] - car["height"],
         }

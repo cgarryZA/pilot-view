@@ -1,0 +1,86 @@
+import json
+import threading
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+CONFIG_DIR = PROJECT_ROOT / "config"
+CONFIG_FILE = CONFIG_DIR / "calibration.json"
+
+DEFAULTS: dict[str, Any] = {
+    "garage": {"width": 3.0, "length": 5.8, "height": 2.3},
+    "vehicle": {
+        "extent": {"length": 4.30, "width": 1.90, "height": 1.16},
+        "model_offset": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "model_yaw_deg": 0.0,
+        "model_scale": 1.0,
+    },
+    "live_view": {
+        "camera_position": {"x": 0.0, "y": 1.45, "z": 5.6},
+        "camera_look_at": {"x": 0.0, "y": 0.6, "z": 0.0},
+        "camera_fov_deg": 50.0,
+    },
+    "thresholds": {"warn": 0.50, "danger": 0.20},
+}
+
+_lock = threading.Lock()
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursive merge: override values into base, return new dict.
+
+    Missing keys in override fall back to base. Lists/scalars in override fully replace base.
+    """
+    out = deepcopy(base)
+    for k, v in override.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = deepcopy(v)
+    return out
+
+
+def load() -> dict:
+    with _lock:
+        if not CONFIG_FILE.exists():
+            return deepcopy(DEFAULTS)
+        try:
+            with CONFIG_FILE.open() as f:
+                loaded = json.load(f)
+            return _deep_merge(DEFAULTS, loaded)
+        except (json.JSONDecodeError, OSError):
+            return deepcopy(DEFAULTS)
+
+
+def save(updates: dict) -> dict:
+    """Merge updates into current calibration and persist. Returns the new full calibration."""
+    with _lock:
+        current = load_unlocked()
+        merged = _deep_merge(current, updates)
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = CONFIG_FILE.with_suffix(".json.tmp")
+        with tmp.open("w") as f:
+            json.dump(merged, f, indent=2)
+        tmp.replace(CONFIG_FILE)
+        return merged
+
+
+def reset() -> dict:
+    """Reset to defaults; deletes the config file."""
+    with _lock:
+        if CONFIG_FILE.exists():
+            CONFIG_FILE.unlink()
+        return deepcopy(DEFAULTS)
+
+
+def load_unlocked() -> dict:
+    """Internal: load without acquiring the lock (caller must hold it)."""
+    if not CONFIG_FILE.exists():
+        return deepcopy(DEFAULTS)
+    try:
+        with CONFIG_FILE.open() as f:
+            loaded = json.load(f)
+        return _deep_merge(DEFAULTS, loaded)
+    except (json.JSONDecodeError, OSError):
+        return deepcopy(DEFAULTS)

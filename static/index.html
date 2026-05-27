@@ -18,10 +18,10 @@
           </div>
         </div>
 
-        <nav class="nav">
+        <nav class="nav" id="nav">
           <a class="nav-item active" data-view="overview">Overview</a>
           <a class="nav-item disabled" data-view="vision">Vision</a>
-          <a class="nav-item disabled" data-view="calibration">Calibration</a>
+          <a class="nav-item" data-view="calibration">Calibration</a>
           <a class="nav-item disabled" data-view="diagnostics">Diagnostics</a>
           <a class="nav-item disabled" data-view="settings">Settings</a>
         </nav>
@@ -35,8 +35,8 @@
       <main class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <div class="title">Overview</div>
-            <div class="subtitle">Garage vision &amp; parking assist</div>
+            <div class="title" id="page-title">Overview</div>
+            <div class="subtitle" id="page-subtitle">Garage vision &amp; parking assist</div>
           </div>
           <div class="topbar-right">
             <div class="pill" id="source-pill">
@@ -100,9 +100,159 @@
           </div>
 
           <!-- Connected (3D) view -->
-          <div class="scene-wrap hidden" id="connected-view">
+          <div class="scene-wrap hidden" id="connected-view" data-mode="live">
             <div class="scene-background" id="scene-background"></div>
             <div class="scene-canvas" id="scene-canvas"></div>
+
+            <aside class="calib-panel" id="calib-panel" aria-hidden="true">
+              <div class="calib-header">
+                <div class="calib-title">CALIBRATION</div>
+                <button class="calib-close" id="calib-close" aria-label="Close">×</button>
+              </div>
+
+              <div class="calib-tabs" role="tablist" id="calib-tabs">
+                <button class="calib-tab active" data-tab="garage" role="tab">Garage</button>
+                <button class="calib-tab" data-tab="vehicle" role="tab">Vehicle</button>
+                <button class="calib-tab" data-tab="live_view" role="tab">Live View</button>
+                <button class="calib-tab" data-tab="thresholds" role="tab">Thresholds</button>
+              </div>
+
+              <div class="calib-body" id="calib-body">
+                <!-- Tab: Garage -->
+                <section class="calib-section active" data-tab="garage">
+                  <div class="calib-hint">Garage interior dimensions in metres.</div>
+                  <div class="calib-row">
+                    <label>Width</label>
+                    <input type="number" step="0.05" min="1.5" max="6" data-path="garage.width" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Length</label>
+                    <input type="number" step="0.05" min="2" max="12" data-path="garage.length" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Height</label>
+                    <input type="number" step="0.05" min="1.8" max="4" data-path="garage.height" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                </section>
+
+                <!-- Tab: Vehicle -->
+                <section class="calib-section" data-tab="vehicle">
+                  <div class="calib-group-title">Bounding box size</div>
+                  <div class="calib-row">
+                    <label>Length</label>
+                    <input type="number" step="0.05" min="2" max="6" data-path="vehicle.extent.length" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Width</label>
+                    <input type="number" step="0.01" min="1.2" max="2.5" data-path="vehicle.extent.width" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Height</label>
+                    <input type="number" step="0.01" min="1.0" max="2.5" data-path="vehicle.extent.height" />
+                    <span class="calib-unit">m</span>
+                  </div>
+
+                  <div class="calib-group-title">Mesh offset (relative to bounding box)</div>
+                  <div class="calib-row">
+                    <label>Offset X</label>
+                    <input type="number" step="0.02" min="-1.5" max="1.5" data-path="vehicle.model_offset.x" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Offset Y</label>
+                    <input type="number" step="0.02" min="-1.5" max="1.5" data-path="vehicle.model_offset.y" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Offset Z</label>
+                    <input type="number" step="0.02" min="-1.5" max="1.5" data-path="vehicle.model_offset.z" />
+                    <span class="calib-unit">m</span>
+                  </div>
+
+                  <div class="calib-group-title">Mesh orientation &amp; scale</div>
+                  <div class="calib-row">
+                    <label>Yaw</label>
+                    <input type="number" step="1" min="-180" max="180" data-path="vehicle.model_yaw_deg" />
+                    <span class="calib-unit">°</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Scale</label>
+                    <input type="number" step="0.01" min="0.3" max="2" data-path="vehicle.model_scale" />
+                    <span class="calib-unit">×</span>
+                  </div>
+                </section>
+
+                <!-- Tab: Live View -->
+                <section class="calib-section" data-tab="live_view">
+                  <div class="calib-hint">Position the virtual camera to match the live image. Defer until real camera is mounted.</div>
+                  <div class="calib-group-title">Camera position</div>
+                  <div class="calib-row">
+                    <label>Position X</label>
+                    <input type="number" step="0.05" min="-5" max="5" data-path="live_view.camera_position.x" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Position Y</label>
+                    <input type="number" step="0.05" min="0" max="4" data-path="live_view.camera_position.y" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Position Z</label>
+                    <input type="number" step="0.05" min="-2" max="15" data-path="live_view.camera_position.z" />
+                    <span class="calib-unit">m</span>
+                  </div>
+
+                  <div class="calib-group-title">Look at</div>
+                  <div class="calib-row">
+                    <label>Target X</label>
+                    <input type="number" step="0.05" min="-5" max="5" data-path="live_view.camera_look_at.x" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Target Y</label>
+                    <input type="number" step="0.05" min="0" max="4" data-path="live_view.camera_look_at.y" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Target Z</label>
+                    <input type="number" step="0.05" min="-2" max="15" data-path="live_view.camera_look_at.z" />
+                    <span class="calib-unit">m</span>
+                  </div>
+
+                  <div class="calib-group-title">Lens</div>
+                  <div class="calib-row">
+                    <label>Field of view</label>
+                    <input type="number" step="1" min="25" max="110" data-path="live_view.camera_fov_deg" />
+                    <span class="calib-unit">°</span>
+                  </div>
+                </section>
+
+                <!-- Tab: Thresholds -->
+                <section class="calib-section" data-tab="thresholds">
+                  <div class="calib-hint">Distance from car edge where colour state flips.</div>
+                  <div class="calib-row">
+                    <label>Warn threshold</label>
+                    <input type="number" step="0.05" min="0.10" max="2" data-path="thresholds.warn" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                  <div class="calib-row">
+                    <label>Danger threshold</label>
+                    <input type="number" step="0.02" min="0.05" max="1" data-path="thresholds.danger" />
+                    <span class="calib-unit">m</span>
+                  </div>
+                </section>
+              </div>
+
+              <div class="calib-footer">
+                <button class="calib-btn calib-btn--ghost" id="calib-reset">Reset to defaults</button>
+                <div class="calib-saved" id="calib-saved">Saved</div>
+              </div>
+            </aside>
 
             <div class="scene-overlay">
               <div class="scene-hud-top">
