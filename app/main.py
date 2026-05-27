@@ -5,9 +5,12 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import calibration
+from app import automations, calibration
 from app.door import door
+from app.lights import lights
 from app.sources import make_source
+
+automations.install()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -65,9 +68,30 @@ def door_toggle():
     return door.trigger_toggle()
 
 
+@app.get("/api/lights")
+def get_lights():
+    return lights.status_dict()
+
+
+@app.post("/api/lights/on")
+def lights_on():
+    return lights.trigger_on()
+
+
+@app.post("/api/lights/off")
+def lights_off():
+    return lights.trigger_off()
+
+
+@app.post("/api/lights/toggle")
+def lights_toggle():
+    return lights.trigger_toggle()
+
+
 def _ws_payload() -> dict:
     payload = source.state()
     payload["door"] = door.status_dict()
+    payload["lights"] = lights.status_dict()
     return payload
 
 

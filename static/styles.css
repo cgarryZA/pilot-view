@@ -251,10 +251,24 @@ body {
   border-color: rgba(74, 222, 128, 0.5);
 }
 
-.pill.door-opening,
-.pill.door-closing {
+.pill.door-partial {
   color: var(--accent);
   border-color: var(--accent-glow);
+}
+
+.pill.door-fault {
+  color: var(--danger);
+  border-color: var(--danger);
+  box-shadow: 0 0 8px var(--danger-glow);
+}
+
+.pill.lights-on {
+  color: var(--warn);
+  border-color: rgba(255, 200, 87, 0.5);
+}
+
+.pill.lights-off {
+  color: var(--muted);
 }
 
 .dot-warn {

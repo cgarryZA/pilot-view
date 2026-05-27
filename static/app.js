@@ -10,6 +10,7 @@ const els = {
   serverPill: $('server-pill'),
   cameraPill: $('camera-pill'),
   doorPill: $('door-pill'),
+  lightsPill: $('lights-pill'),
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
@@ -83,10 +84,17 @@ function setPill(pill, online, label) {
 const DOOR_LABELS = {
   closed: 'Door · closed',
   open: 'Door · open',
-  opening: 'Door · opening…',
-  closing: 'Door · closing…',
+  partial: 'Door · moving',
+  fault: 'Door · sensor fault',
   unknown: 'Door · unknown',
 };
+
+const DOOR_STATE_CLASSES = ['door-closed', 'door-open', 'door-partial', 'door-fault', 'door-unknown'];
+const DOT_CLASSES = ['dot-online', 'dot-offline', 'dot-warn', 'dot-danger'];
+
+function clearClasses(el, classes) {
+  for (const c of classes) el.classList.remove(c);
+}
 
 function applyDoorState(d) {
   const status = (d && d.status) || 'unknown';
@@ -94,29 +102,52 @@ function applyDoorState(d) {
   const dot = pill.querySelector('.dot');
   const text = pill.querySelector('.pill-text');
 
-  for (const cls of ['door-open', 'door-closed', 'door-opening', 'door-closing', 'door-unknown']) {
-    pill.classList.remove(cls);
-  }
+  clearClasses(pill, DOOR_STATE_CLASSES);
   pill.classList.add(`door-${status}`);
 
-  for (const cls of ['dot-online', 'dot-offline', 'dot-warn', 'dot-danger']) {
-    dot.classList.remove(cls);
-  }
+  clearClasses(dot, DOT_CLASSES);
   dot.classList.remove('pulse');
 
   if (status === 'closed') dot.classList.add('dot-online');
   else if (status === 'open') dot.classList.add('dot-warn');
-  else if (status === 'opening' || status === 'closing') {
-    dot.classList.add('dot-online');
-    dot.classList.add('pulse');
-  } else dot.classList.add('dot-offline');
+  else if (status === 'partial') { dot.classList.add('dot-online'); dot.classList.add('pulse'); }
+  else if (status === 'fault') dot.classList.add('dot-danger');
+  else dot.classList.add('dot-offline');
 
   text.textContent = DOOR_LABELS[status] || DOOR_LABELS.unknown;
 
-  // Disable button while in transition
-  const inTransition = status === 'opening' || status === 'closing';
-  pill.disabled = inTransition;
-  pill.style.opacity = inTransition ? '0.75' : '';
+  // Refuse clicks during fault state.
+  const blocked = status === 'fault';
+  pill.disabled = blocked;
+  pill.style.opacity = blocked ? '0.75' : '';
+}
+
+const LIGHTS_STATE_CLASSES = ['lights-on', 'lights-off', 'lights-unknown'];
+
+function applyLightsState(l) {
+  const pill = els.lightsPill;
+  const dot = pill.querySelector('.dot');
+  const text = pill.querySelector('.pill-text');
+
+  clearClasses(pill, LIGHTS_STATE_CLASSES);
+  clearClasses(dot, DOT_CLASSES);
+
+  if (l == null) {
+    pill.classList.add('lights-unknown');
+    dot.classList.add('dot-offline');
+    text.textContent = 'Lights · ?';
+    return;
+  }
+
+  if (l.on) {
+    pill.classList.add('lights-on');
+    dot.classList.add('dot-warn');
+    text.textContent = 'Lights · on';
+  } else {
+    pill.classList.add('lights-off');
+    dot.classList.add('dot-offline');
+    text.textContent = 'Lights · off';
+  }
 }
 
 async function toggleDoor() {
@@ -127,7 +158,16 @@ async function toggleDoor() {
   }
 }
 
+async function toggleLights() {
+  try {
+    await fetch('/api/lights/toggle', { method: 'POST' });
+  } catch (err) {
+    console.error('[lights] toggle failed', err);
+  }
+}
+
 els.doorPill.addEventListener('click', toggleDoor);
+els.lightsPill.addEventListener('click', toggleLights);
 
 function classifyClearance(value, thresholds) {
   if (value < thresholds.danger) return 'danger';
@@ -231,8 +271,9 @@ function applyState(payload) {
   // Camera pill
   setPill(els.cameraPill, !!c.connected, 'Camera');
 
-  // Door pill
+  // Door + Lights pills
   applyDoorState(payload.door);
+  applyLightsState(payload.lights);
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';
