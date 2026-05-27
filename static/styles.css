@@ -401,14 +401,25 @@ body {
 /* ─── Connected (3D scene) view ──────────────────────── */
 .scene-wrap {
   position: relative;
+  display: grid;
+  grid-template-columns: 1fr 0;
+  grid-template-rows: 1fr;
   width: 100%;
   height: 100%;
   overflow: hidden;
+  transition: grid-template-columns 0.25s ease;
+}
+
+.scene-background,
+.scene-canvas,
+.scene-overlay {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .scene-background {
-  position: absolute;
-  inset: 0;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
@@ -425,8 +436,8 @@ body {
 }
 
 .scene-canvas {
-  position: absolute;
-  inset: 0;
+  position: relative;
+  overflow: hidden;
 }
 
 .scene-canvas canvas {
@@ -436,13 +447,12 @@ body {
 }
 
 .scene-overlay {
-  position: absolute;
-  inset: 0;
   pointer-events: none;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   padding: 24px;
+  z-index: 2;
 }
 
 .scene-hud-top {
@@ -487,12 +497,8 @@ body {
 }
 
 /* ─── Calibration panel ──────────────────────────────── */
-.scene-wrap { display: grid; grid-template-columns: 1fr 0fr; transition: grid-template-columns 0.25s ease; }
-.scene-wrap[data-app-mode="calibration"] { grid-template-columns: 1fr 360px; }
-
-.scene-background, .scene-canvas, .scene-overlay {
-  grid-column: 1;
-  grid-row: 1;
+.scene-wrap[data-app-mode="calibration"] {
+  grid-template-columns: 1fr 360px;
 }
 
 .calib-panel {
