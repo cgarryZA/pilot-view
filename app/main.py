@@ -19,6 +19,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = PROJECT_ROOT / "static"
 
 app = FastAPI(title="Pilot View")
+
+
+@app.middleware("http")
+async def add_cache_control(request, call_next):
+    """Static assets must revalidate every load. We deploy small frequent changes
+    and stale cached JS/CSS causes 'half-updated' bugs that look like missing
+    features. ETag/Last-Modified are still set by StaticFiles, so 304s remain
+    cheap — we just force the browser to ask each time."""
+    response = await call_next(request)
+    path = request.url.path
+    if path.startswith("/static/") or path == "/":
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 source = make_source()
