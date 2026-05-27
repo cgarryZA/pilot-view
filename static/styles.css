@@ -271,6 +271,20 @@ body {
   color: var(--muted);
 }
 
+.pill.env-safe {
+  color: var(--text);
+}
+
+.pill.env-warn {
+  color: var(--warn);
+  border-color: rgba(255, 200, 87, 0.5);
+}
+
+.pill.env-unavailable {
+  color: var(--dim);
+  border-style: dashed;
+}
+
 .dot-warn {
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn);
@@ -898,6 +912,11 @@ body {
   .subtitle { font-size: 9px; }
   .topbar-right .pill .pill-text { display: none; }
   .topbar-right .pill { padding: 8px; }
+  /* Value pills always show their reading */
+  .topbar-right #temp-pill .pill-text,
+  .topbar-right #humidity-pill .pill-text { display: inline; }
+  .topbar-right #temp-pill,
+  .topbar-right #humidity-pill { padding: 7px 10px; }
 
   .stage-card { margin: 16px auto; padding: 22px; }
   .stage-headline { font-size: 18px; letter-spacing: 0.24em; }

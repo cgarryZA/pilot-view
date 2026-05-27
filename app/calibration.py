@@ -22,6 +22,10 @@ DEFAULTS: dict[str, Any] = {
         "camera_fov_deg": 50.0,
     },
     "thresholds": {"warn": 0.50, "danger": 0.20},
+    "environment": {
+        "temperature": {"warn_low": 5.0, "warn_high": 30.0},
+        "humidity": {"warn_low": 25.0, "warn_high": 70.0},
+    },
 }
 
 _lock = threading.Lock()

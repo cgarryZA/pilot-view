@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from app import automations, calibration
 from app.door import door
 from app.lights import lights
+from app.sensors import sensors
 from app.sources import make_source
 
 automations.install()
@@ -88,10 +89,16 @@ def lights_toggle():
     return lights.trigger_toggle()
 
 
+@app.get("/api/environment")
+def get_environment():
+    return sensors.read()
+
+
 def _ws_payload() -> dict:
     payload = source.state()
     payload["door"] = door.status_dict()
     payload["lights"] = lights.status_dict()
+    payload["environment"] = sensors.read()
     return payload
 
 

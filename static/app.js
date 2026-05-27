@@ -11,6 +11,8 @@ const els = {
   cameraPill: $('camera-pill'),
   doorPill: $('door-pill'),
   lightsPill: $('lights-pill'),
+  tempPill: $('temp-pill'),
+  humidityPill: $('humidity-pill'),
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
@@ -169,6 +171,36 @@ async function toggleLights() {
 els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
 
+const ENV_STATE_CLASSES = ['env-safe', 'env-warn', 'env-unavailable'];
+
+function applyEnvPill(pill, value, unit, thresholds) {
+  const dot = pill.querySelector('.dot');
+  const text = pill.querySelector('.pill-text');
+  clearClasses(pill, ENV_STATE_CLASSES);
+  clearClasses(dot, DOT_CLASSES);
+
+  if (value == null || isNaN(value)) {
+    pill.classList.add('env-unavailable');
+    dot.classList.add('dot-offline');
+    text.textContent = `— ${unit}`;
+    return;
+  }
+
+  const out = thresholds && (value < thresholds.warn_low || value > thresholds.warn_high);
+  pill.classList.add(out ? 'env-warn' : 'env-safe');
+  dot.classList.add(out ? 'dot-warn' : 'dot-online');
+  text.textContent = `${value}${unit}`;
+}
+
+let currentCalibration = null;
+
+function applyEnvironment(env) {
+  const t = currentCalibration?.environment?.temperature;
+  const h = currentCalibration?.environment?.humidity;
+  applyEnvPill(els.tempPill, env?.temperature_c, ' °C', t);
+  applyEnvPill(els.humidityPill, env?.humidity_pct, '%', h);
+}
+
 function classifyClearance(value, thresholds) {
   if (value < thresholds.danger) return 'danger';
   if (value < thresholds.warn) return 'warning';
@@ -186,7 +218,11 @@ function ensureScene() {
   if (scene) return scene;
   scene = createScene(els.sceneCanvas);
   scene.setMode(viewMode);
-  calib = createCalibration({ scene, panel: els.calibPanel });
+  calib = createCalibration({
+    scene,
+    panel: els.calibPanel,
+    onChange: (cal) => { currentCalibration = cal; },
+  });
   return scene;
 }
 
@@ -274,6 +310,9 @@ function applyState(payload) {
   // Door + Lights pills
   applyDoorState(payload.door);
   applyLightsState(payload.lights);
+
+  // Environment pills
+  applyEnvironment(payload.environment);
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';
