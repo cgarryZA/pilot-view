@@ -9,6 +9,7 @@ const els = {
   sourcePill: $('source-pill'),
   serverPill: $('server-pill'),
   cameraPill: $('camera-pill'),
+  doorPill: $('door-pill'),
 
   disconnected: $('disconnected-view'),
   connected: $('connected-view'),
@@ -78,6 +79,55 @@ function setPill(pill, online, label) {
   pill.classList.toggle('online', online);
   if (label !== undefined) text.textContent = label;
 }
+
+const DOOR_LABELS = {
+  closed: 'Door · closed',
+  open: 'Door · open',
+  opening: 'Door · opening…',
+  closing: 'Door · closing…',
+  unknown: 'Door · unknown',
+};
+
+function applyDoorState(d) {
+  const status = (d && d.status) || 'unknown';
+  const pill = els.doorPill;
+  const dot = pill.querySelector('.dot');
+  const text = pill.querySelector('.pill-text');
+
+  for (const cls of ['door-open', 'door-closed', 'door-opening', 'door-closing', 'door-unknown']) {
+    pill.classList.remove(cls);
+  }
+  pill.classList.add(`door-${status}`);
+
+  for (const cls of ['dot-online', 'dot-offline', 'dot-warn', 'dot-danger']) {
+    dot.classList.remove(cls);
+  }
+  dot.classList.remove('pulse');
+
+  if (status === 'closed') dot.classList.add('dot-online');
+  else if (status === 'open') dot.classList.add('dot-warn');
+  else if (status === 'opening' || status === 'closing') {
+    dot.classList.add('dot-online');
+    dot.classList.add('pulse');
+  } else dot.classList.add('dot-offline');
+
+  text.textContent = DOOR_LABELS[status] || DOOR_LABELS.unknown;
+
+  // Disable button while in transition
+  const inTransition = status === 'opening' || status === 'closing';
+  pill.disabled = inTransition;
+  pill.style.opacity = inTransition ? '0.75' : '';
+}
+
+async function toggleDoor() {
+  try {
+    await fetch('/api/door/toggle', { method: 'POST' });
+  } catch (err) {
+    console.error('[door] toggle failed', err);
+  }
+}
+
+els.doorPill.addEventListener('click', toggleDoor);
 
 function classifyClearance(value, thresholds) {
   if (value < thresholds.danger) return 'danger';
@@ -180,6 +230,9 @@ function applyState(payload) {
 
   // Camera pill
   setPill(els.cameraPill, !!c.connected, 'Camera');
+
+  // Door pill
+  applyDoorState(payload.door);
 
   // Disconnected card details (kept fresh even when connected, in case we toggle back)
   els.camModel.textContent = c.model || '—';

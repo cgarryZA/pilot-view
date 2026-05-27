@@ -225,6 +225,43 @@ body {
   color: var(--text);
 }
 
+.pill-clickable {
+  appearance: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.pill-clickable:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.pill-clickable:active {
+  transform: scale(0.97);
+}
+
+.pill.door-open {
+  color: var(--warn);
+  border-color: rgba(255, 200, 87, 0.5);
+}
+
+.pill.door-closed {
+  color: var(--ok);
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.pill.door-opening,
+.pill.door-closing {
+  color: var(--accent);
+  border-color: var(--accent-glow);
+}
+
+.dot-warn {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+
 #source-pill {
   border-color: var(--accent-glow);
   color: var(--accent);

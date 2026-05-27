@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import calibration
+from app.door import door
 from app.sources import make_source
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -24,7 +25,7 @@ def index():
 
 @app.get("/api/state")
 def state():
-    return source.state()
+    return _ws_payload()
 
 
 @app.get("/api/calibration")
@@ -44,12 +45,38 @@ def reset_calibration():
     return calibration.reset()
 
 
+@app.get("/api/door")
+def get_door():
+    return door.status_dict()
+
+
+@app.post("/api/door/open")
+def door_open():
+    return door.trigger_open()
+
+
+@app.post("/api/door/close")
+def door_close():
+    return door.trigger_close()
+
+
+@app.post("/api/door/toggle")
+def door_toggle():
+    return door.trigger_toggle()
+
+
+def _ws_payload() -> dict:
+    payload = source.state()
+    payload["door"] = door.status_dict()
+    return payload
+
+
 @app.websocket("/ws")
 async def ws(socket: WebSocket):
     await socket.accept()
     try:
         while True:
-            await socket.send_json(source.state())
+            await socket.send_json(_ws_payload())
             await asyncio.sleep(1 / 15)
     except WebSocketDisconnect:
         return
