@@ -184,14 +184,17 @@ els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
 
 // ─── Temporary: mesh quality cycler (for picking decimation ratio) ───
-const QUALITY_LEVELS = [
-  { id: 'original', label: 'Original' },
-  { id: '70', label: '70%' },
-  { id: '50', label: '50%' },
-  { id: '30', label: '30%' },
-  { id: '10', label: '10%' },
-  { id: '3', label: '3%' },
-];
+// Per-vehicle quality cycle. We compute the active list from the vehicle's
+// mesh_variants — vehicles with an empty list are "locked" and the pill shows
+// (locked) instead of cycling.
+function qualityLevelsForActive() {
+  const variants = currentActiveVehicle?.mesh_variants || [];
+  if (variants.length === 0) return [{ id: 'original', label: 'Locked' }];
+  return [
+    { id: 'original', label: 'Original' },
+    ...variants.map((v) => ({ id: v, label: `${v}%` })),
+  ];
+}
 
 const QUALITY_STORAGE_KEY = 'pilot-view.vehicle-quality';
 
@@ -222,8 +225,14 @@ function applyQualityToUrl(url, qualityId) {
 
 function applyEffectiveActiveVehicle() {
   if (!scene || !currentActiveVehicle) return;
-  const qId = qualityFor(activeVehicleId);
-  const url = applyQualityToUrl(currentActiveVehicle.model_url, qId);
+  const variants = currentActiveVehicle.mesh_variants || [];
+  const stored = qualityFor(activeVehicleId);
+  // Validate stored choice against this vehicle's actual variants — a Mazda with
+  // no variants would otherwise build mazda_10.glb (404) if localStorage still
+  // remembers a Lambo-era choice.
+  const valid = stored === 'original' || variants.includes(stored);
+  const effectiveQuality = valid ? stored : 'original';
+  const url = applyQualityToUrl(currentActiveVehicle.model_url, effectiveQuality);
   scene.applyActiveVehicle({ ...currentActiveVehicle, model_url: url });
 }
 
@@ -232,20 +241,27 @@ function updateQualityPill() {
   if (!activeVehicleId) {
     els.qualityPill.classList.remove('quality-pill');
     text.textContent = 'Quality · —';
+    els.qualityPill.disabled = true;
     return;
   }
   els.qualityPill.classList.add('quality-pill');
+  const levels = qualityLevelsForActive();
   const qId = qualityFor(activeVehicleId);
-  const level = QUALITY_LEVELS.find((l) => l.id === qId) || QUALITY_LEVELS[0];
+  const level = levels.find((l) => l.id === qId) || levels[0];
   const vname = currentActiveVehicle?.name || activeVehicleId;
   text.textContent = `Quality · ${vname} · ${level.label}`;
+  // Only allow clicks if there's more than one option.
+  els.qualityPill.disabled = levels.length <= 1;
+  els.qualityPill.style.opacity = levels.length <= 1 ? '0.6' : '';
 }
 
 function cycleQuality() {
   if (!activeVehicleId) return;
+  const levels = qualityLevelsForActive();
+  if (levels.length <= 1) return;
   const current = qualityFor(activeVehicleId);
-  const idx = QUALITY_LEVELS.findIndex((l) => l.id === current);
-  const next = QUALITY_LEVELS[(idx + 1) % QUALITY_LEVELS.length];
+  const idx = levels.findIndex((l) => l.id === current);
+  const next = levels[(idx + 1) % levels.length];
   qualityByVehicle[activeVehicleId] = next.id;
   saveQualityPrefs(qualityByVehicle);
   applyEffectiveActiveVehicle();

@@ -15,6 +15,7 @@ def _vehicle_defaults(
     mirror_x: bool = False,
     beacon_id: str = "",
     battery_monitor_mac: str = "",
+    mesh_variants: list[str] | None = None,
 ) -> dict:
     return {
         "name": name,
@@ -26,6 +27,9 @@ def _vehicle_defaults(
         "model_mirror_x": mirror_x,
         "beacon_id": beacon_id,
         "battery_monitor_mac": battery_monitor_mac,
+        # Decimated mesh variants — empty means the canonical model_url is
+        # locked in and the quality cycler shouldn't offer alternatives.
+        "mesh_variants": mesh_variants or [],
     }
 
 
@@ -41,11 +45,16 @@ DEFAULTS: dict[str, Any] = {
                 # Set so synthetic battery monitor is visible for the Lambo
                 # (set to actual BM2 MAC when device arrives).
                 battery_monitor_mac="synthetic-lambo",
+                # Available decimated meshes; cycler picks one (still TBD).
+                mesh_variants=["70", "50", "30", "10", "3"],
             ),
             "mazda": _vehicle_defaults(
                 name="Mazda",
+                # Canonical Mazda = the 3% decimated variant (3% looked fine for this model).
                 model_url="/static/assets/models/mazda.glb",
                 extent={"length": 4.07, "width": 1.70, "height": 1.51},
+                # No alternatives — Mazda is locked in.
+                mesh_variants=[],
             ),
         },
     },
