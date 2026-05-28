@@ -18,6 +18,7 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 PASSKEYS_FILE = CONFIG_DIR / "passkeys.json"
+SESSIONS_FILE = CONFIG_DIR / "sessions.json"
 
 SESSION_TTL = timedelta(days=30)
 SESSION_COOKIE_NAME = "pv_session"
@@ -148,9 +149,56 @@ passkeys = PasskeyStore()
 # ─── Session store (in-memory) ─────────────────────────────────────────
 
 class SessionStore:
+    """In-memory sessions, persisted to disk so a service restart (e.g. a deploy)
+    doesn't log everyone out. Only created_at drives the 30-day TTL; last_used_at
+    is best-effort and not flushed on every request (too chatty)."""
+
     def __init__(self) -> None:
         self._sessions: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if not SESSIONS_FILE.exists():
+            return
+        try:
+            with SESSIONS_FILE.open() as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+        now = _now()
+        for sid, d in (data or {}).items():
+            try:
+                created = datetime.fromisoformat(d["created_at"])
+            except (KeyError, ValueError):
+                continue
+            if now - created > SESSION_TTL:
+                continue
+            self._sessions[sid] = {
+                "credential_id": d.get("credential_id", ""),
+                "nickname": d.get("nickname", "device"),
+                "created_at": created,
+                "last_used_at": created,
+            }
+
+    def _save_unlocked(self) -> None:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        data = {
+            sid: {
+                "credential_id": d["credential_id"],
+                "nickname": d["nickname"],
+                "created_at": d["created_at"].isoformat(),
+                "last_used_at": d["last_used_at"].isoformat(),
+            }
+            for sid, d in self._sessions.items()
+        }
+        tmp = SESSIONS_FILE.with_suffix(".json.tmp")
+        try:
+            with tmp.open("w") as f:
+                json.dump(data, f)
+            tmp.replace(SESSIONS_FILE)
+        except OSError as exc:
+            print(f"[sessions] save failed: {exc}")
 
     def create(self, credential_id: str, nickname: str) -> str:
         session_id = secrets.token_urlsafe(32)
@@ -161,6 +209,7 @@ class SessionStore:
                 "created_at": _now(),
                 "last_used_at": _now(),
             }
+            self._save_unlocked()
         return session_id
 
     def get(self, session_id: str) -> Optional[dict]:
@@ -170,21 +219,23 @@ class SessionStore:
                 return None
             if _now() - data["created_at"] > SESSION_TTL:
                 del self._sessions[session_id]
+                self._save_unlocked()
                 return None
-            # Sliding refresh: extend on each use
-            data["last_used_at"] = _now()
+            data["last_used_at"] = _now()  # in-memory only; not flushed per-request
             return dict(data)
 
     def destroy(self, session_id: str) -> None:
         with self._lock:
-            self._sessions.pop(session_id, None)
+            if self._sessions.pop(session_id, None) is not None:
+                self._save_unlocked()
 
     def destroy_for_credential(self, credential_id: str) -> int:
-        """Kill any sessions belonging to a revoked credential."""
         with self._lock:
             to_kill = [sid for sid, d in self._sessions.items() if d["credential_id"] == credential_id]
             for sid in to_kill:
                 del self._sessions[sid]
+            if to_kill:
+                self._save_unlocked()
             return len(to_kill)
 
 

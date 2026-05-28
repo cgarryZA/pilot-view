@@ -717,13 +717,20 @@ function connect() {
     }
   };
 
-  ws.onclose = (ev) => {
+  ws.onclose = async (ev) => {
     setPill(els.serverPill, false, 'Server');
     els.streamStatus.textContent = 'reconnecting';
-    // 1008 = policy violation (session invalid). Don't reconnect; show login.
-    if (ev && ev.code === 1008) {
-      showAuthOverlay({ has_passkeys: true });
-      return;
+    // A rejected handshake (auth gone after a restart) shows as 1006/1008.
+    // Re-check auth on every close: if we've lost the session, surface the
+    // login overlay instead of silently retrying forever.
+    try {
+      const s = await auth.status();
+      if (!s.authenticated) {
+        showAuthOverlay(s);
+        return;
+      }
+    } catch (err) {
+      // status check itself failed (server down) — fall through to retry
     }
     setTimeout(connect, 1500);
   };
