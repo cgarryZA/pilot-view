@@ -62,6 +62,25 @@ def near_wall_world(width: float, height: float, length: float) -> np.ndarray:
     ], dtype=np.float64)
 
 
+def recede_probe_world(width: float, height: float, step: float = 0.25) -> np.ndarray:
+    """A tiny +Z step from each BLUE back-wall corner.
+
+    A 3D line projects to a straight 2D line, so the receding edge's image
+    direction is *constant* along its whole length — sampling 25 cm in front of
+    the back corner gives the exact same direction as the full (off-screen) near
+    corner, but the probe point is always in front of the camera. That keeps the
+    direction (and its sign) well-defined even when the camera sits right at the
+    near wall, where projecting the true near corner would be numerically
+    garbage (it lies at/behind the camera)."""
+    w = width / 2.0
+    return np.array([
+        [-w, height, step],
+        [ w, height, step],
+        [ w, 0.0,    step],
+        [-w, 0.0,    step],
+    ], dtype=np.float64)
+
+
 def door_corners_world(door_w: float, door_h: float, center_x: float = 0.0) -> Dict[str, Tuple[float, float, float]]:
     half = door_w / 2.0
     return {
@@ -215,7 +234,9 @@ def solve_full(
     diag = float(np.hypot(w_px, h_px))
 
     back_world = back_wall_world(garage_w, garage_h)
-    near_world = near_wall_world(garage_w, garage_h, garage_l)
+    # Direction constraint uses a small +Z probe (constant image direction along
+    # the receding edge), not the off-screen near corner — see recede_probe_world.
+    near_world = recede_probe_world(garage_w, garage_h)
     back_img = np.array(back_image_points, dtype=np.float64)
     near_img = np.array(near_image_points, dtype=np.float64)
 
