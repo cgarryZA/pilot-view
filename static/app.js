@@ -602,10 +602,10 @@ function setLiveBackground(url) {
   if (url === currentLiveUrl) return;
   currentLiveUrl = url;
   if (url) {
-    els.sceneBackground.style.backgroundImage = `url("${url}")`;
+    els.sceneBackground.src = url;
     if (viewMode === 'live') els.sceneBackground.classList.add('visible');
   } else {
-    els.sceneBackground.style.backgroundImage = '';
+    els.sceneBackground.removeAttribute('src');
     els.sceneBackground.classList.remove('visible');
   }
 }

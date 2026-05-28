@@ -510,6 +510,7 @@ export function createScene(container) {
       );
     }
     if (geom.car) {
+      car.group.visible = true;
       if (geom.car.extent) {
         const e = geom.car.extent;
         if (e.length !== car.extent.length || e.width !== car.extent.width || e.height !== car.extent.height) {
@@ -520,6 +521,9 @@ export function createScene(container) {
       const p = geom.car.position;
       car.group.position.set(p.x, 0, p.z);
       car.group.rotation.y = -(geom.car.yaw || 0);
+    } else {
+      // No car detected (e.g. orbbec RGB-only before depth detection lands).
+      car.group.visible = false;
     }
 
     // Per-side state classification.

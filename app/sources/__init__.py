@@ -91,6 +91,16 @@ class SourceManager:
             src = self._current
         return src.state()
 
+    def get_jpeg(self):
+        """Return the latest JPEG frame from the current source, or None.
+
+        Only sources with a video stream (orbbec) implement get_jpeg.
+        """
+        with self._lock:
+            src = self._current
+        fn = getattr(src, "get_jpeg", None)
+        return fn() if callable(fn) else None
+
     def switch(self, name: str, persist: bool = True) -> str:
         name = (name or "").strip().lower()
         if name not in SOURCE_NAMES:

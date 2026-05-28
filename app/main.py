@@ -2,7 +2,7 @@ import asyncio
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import auth, automations, calibration, diagnostics, pose_solver
@@ -191,6 +191,27 @@ async def set_active_vehicle(payload: dict, _=Depends(require_auth)):
     if not isinstance(payload, dict) or "id" not in payload:
         raise HTTPException(400, "expected {'id': '<vehicle_id>'}")
     return vehicles.set_active(payload["id"])
+
+
+@app.get("/api/camera/stream")
+async def camera_stream(_=Depends(require_auth)):
+    """MJPEG stream of the current source's latest frames (orbbec only)."""
+    if source_manager.get_jpeg() is None:
+        raise HTTPException(404, "no video stream from current source")
+
+    async def gen():
+        boundary = b"--frame"
+        while True:
+            jpeg = source_manager.get_jpeg()
+            if jpeg:
+                yield boundary + b"\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
+            await asyncio.sleep(1 / 20)
+
+    return StreamingResponse(
+        gen(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/api/source")
