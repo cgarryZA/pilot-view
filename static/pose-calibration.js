@@ -59,41 +59,54 @@ export function createPoseCalibration({ onPoseApplied }) {
   const imgSizeEl = $('pose-imgsize');
 
   let pins = [];                  // [{ x, y }] in image-natural pixels
+  let pinEls = [];                // [{ g, ring, crossH, crossV, label }] — kept across drags
+  let polyEl = null;
   let imageSize = { w: 0, h: 0 }; // natural size (pixels)
   let currentCal = null;
   let liveUrl = null;
 
+  // Full structural rebuild — called on open / reset / resize. NOT during drag
+  // (rebuilding would destroy the element that holds the pointer capture).
   function render() {
     if (!imageSize.w || !imageSize.h) return;
     svg.setAttribute('viewBox', `0 0 ${imageSize.w} ${imageSize.h}`);
     sizeSvgToImage();
 
-    // Wipe SVG and re-render
     while (svg.firstChild) svg.removeChild(svg.firstChild);
+    pinEls = [];
 
-    if (pins.length === 4) {
-      // Outline the polygon connecting pins
-      const path = nsel('polygon', {
-        class: 'pin-line',
-        points: pins.map((p) => `${p.x},${p.y}`).join(' '),
-      });
-      svg.appendChild(path);
-    }
+    polyEl = nsel('polygon', { class: 'pin-line', points: '' });
+    svg.appendChild(polyEl);
 
     pins.forEach((p, idx) => {
       const g = nsel('g', { class: 'pin', 'data-idx': idx });
-      g.appendChild(nsel('circle', {
-        class: 'pin-ring',
-        cx: p.x, cy: p.y, r: 22,
-      }));
-      // small crosshair
-      g.appendChild(nsel('line', { class: 'pin-cross', x1: p.x - 7, y1: p.y, x2: p.x + 7, y2: p.y }));
-      g.appendChild(nsel('line', { class: 'pin-cross', x1: p.x, y1: p.y - 7, x2: p.x, y2: p.y + 7 }));
-      g.appendChild(nsel('text', {
-        class: 'pin-label', x: p.x, y: p.y - 28,
-      })).textContent = PIN_LABELS[idx];
+      const ring = nsel('circle', { class: 'pin-ring', r: 22 });
+      const crossH = nsel('line', { class: 'pin-cross' });
+      const crossV = nsel('line', { class: 'pin-cross' });
+      const label = nsel('text', { class: 'pin-label' });
+      label.textContent = PIN_LABELS[idx];
+      g.append(ring, crossH, crossV, label);
       g.addEventListener('pointerdown', onPinDown);
       svg.appendChild(g);
+      pinEls.push({ g, ring, crossH, crossV, label });
+    });
+    updatePinPositions();
+  }
+
+  // Cheap per-frame position update — moves existing elements, no rebuild.
+  function updatePinPositions() {
+    if (polyEl) polyEl.setAttribute('points', pins.map((p) => `${p.x},${p.y}`).join(' '));
+    pins.forEach((p, idx) => {
+      const e = pinEls[idx];
+      if (!e) return;
+      e.ring.setAttribute('cx', p.x);
+      e.ring.setAttribute('cy', p.y);
+      e.crossH.setAttribute('x1', p.x - 7); e.crossH.setAttribute('y1', p.y);
+      e.crossH.setAttribute('x2', p.x + 7); e.crossH.setAttribute('y2', p.y);
+      e.crossV.setAttribute('x1', p.x); e.crossV.setAttribute('y1', p.y - 7);
+      e.crossV.setAttribute('x2', p.x); e.crossV.setAttribute('y2', p.y + 7);
+      e.label.setAttribute('x', p.x);
+      e.label.setAttribute('y', p.y - 28);
     });
   }
 
@@ -131,7 +144,7 @@ export function createPoseCalibration({ onPoseApplied }) {
       x: Math.max(0, Math.min(imageSize.w, drag.start.x + dx)),
       y: Math.max(0, Math.min(imageSize.h, drag.start.y + dy)),
     };
-    render();
+    updatePinPositions();   // in-place move, don't rebuild
   }
   function onPinUp(ev) {
     if (!drag) return;
