@@ -81,7 +81,8 @@ def _ippe_back_wall(back_img: np.ndarray, back_world: np.ndarray, K: np.ndarray)
     for i in range(n):
         R, _ = cv2.Rodrigues(rvecs[i])
         cam = (-R.T @ tvecs[i]).flatten()
-        err = float(reproj[i]) if reproj is not None else 0.0
+        # reproj[i] is an array (numpy 2.x rejects float() on non-0d arrays).
+        err = float(np.ravel(reproj[i])[0]) if reproj is not None else 0.0
         score = (1000.0 if cam[1] > 0 else 0.0) - err   # prefer camera above floor
         if best is None or score > best[0]:
             best = (score, rvecs[i], tvecs[i])
