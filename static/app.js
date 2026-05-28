@@ -1,5 +1,6 @@
 import { createScene } from '/static/scene.js';
 import { createCalibration } from '/static/calibration.js';
+import { createPoseCalibration } from '/static/pose-calibration.js';
 import * as auth from '/static/auth.js';
 
 const $ = (id) => document.getElementById(id);
@@ -374,6 +375,7 @@ function classifyClearance(value, thresholds) {
 // ─── Scene lifecycle ─────────────────────────────────
 let scene = null;
 let calib = null;
+let pose = null;
 let viewMode = 'live';
 let appMode = 'overview';
 let currentLiveUrl = null;
@@ -387,8 +389,22 @@ function ensureScene() {
     panel: els.calibPanel,
     onChange: (cal) => { currentCalibration = cal; },
   });
+  pose = createPoseCalibration({
+    onPoseApplied: () => {
+      // calibration.js doesn't auto-reload when the server saves on our behalf,
+      // so pull the fresh state.
+      if (calib && calib.reload) calib.reload();
+    },
+  });
   return scene;
 }
+
+// Wire the Pose-pin opener button (inside the Live View calibration tab)
+document.addEventListener('click', (ev) => {
+  if (ev.target.id !== 'pose-pin-open') return;
+  if (!pose) ensureScene();
+  if (pose && currentCalibration) pose.open(currentCalibration, currentLiveUrl);
+});
 
 function showDisconnected() {
   els.disconnected.classList.remove('hidden');

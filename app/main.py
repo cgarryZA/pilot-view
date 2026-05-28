@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, automations, calibration, diagnostics
+from app import auth, automations, calibration, diagnostics, pose_solver
 from app.auth import require_auth, current_session
 from app.battery_monitor import battery_monitor
 from app.door import door
@@ -67,6 +67,63 @@ async def put_calibration(updates: dict, _=Depends(require_auth)):
 @app.post("/api/calibration/reset")
 def reset_calibration(_=Depends(require_auth)):
     return calibration.reset()
+
+
+@app.post("/api/calibration/solve_pose")
+async def solve_pose(payload: dict, _=Depends(require_auth)):
+    """Solve camera pose from 4 image-point pins.
+
+    Input:
+      {
+        "image_points": [[u,v], [u,v], [u,v], [u,v]],   // bottom-L, BR, TR, TL
+        "image_size":   {"width": int, "height": int},
+        "fov_deg":      float,
+        "door_opening": {"width": float, "height": float}  // optional, defaults from calibration
+      }
+    """
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "expected JSON object")
+    try:
+        pts = payload["image_points"]
+        size = payload["image_size"]
+        fov = float(payload.get("fov_deg") or 50.0)
+        door = payload.get("door_opening") or {}
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(400, f"invalid payload: {exc}")
+
+    if not isinstance(pts, list) or len(pts) != 4 or any(len(p) != 2 for p in pts):
+        raise HTTPException(400, "image_points must be a list of 4 [u, v] pairs")
+
+    cal = calibration.load()
+    garage = cal.get("garage", {})
+    door_w = float(door.get("width") or garage.get("door_opening_width") or 2.4)
+    door_h = float(door.get("height") or garage.get("door_opening_height") or 2.0)
+
+    world_points = pose_solver.door_opening_world_corners(door_w, door_h)
+    image_size = (int(size["width"]), int(size["height"]))
+    image_points = [(float(u), float(v)) for u, v in pts]
+
+    try:
+        result = pose_solver.solve_camera_pose(
+            image_points=image_points,
+            image_size_px=image_size,
+            world_points=world_points,
+            fov_deg=fov,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    # Persist into live_view automatically — caller can refuse this by saving
+    # the values explicitly via PUT instead. Atomic for the user: drag → solve → applied.
+    calibration.save({
+        "live_view": {
+            "camera_position": result["camera_position"],
+            "camera_look_at":  result["camera_look_at"],
+            "camera_fov_deg":  fov,
+        },
+    })
+
+    return result
 
 
 @app.get("/api/door")

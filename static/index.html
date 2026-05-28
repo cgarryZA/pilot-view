@@ -271,6 +271,10 @@
                     <input type="number" step="1" min="25" max="110" data-path="live_view.camera_fov_deg" />
                     <span class="calib-unit">°</span>
                   </div>
+
+                  <div class="calib-group-title">Pose calibration</div>
+                  <div class="calib-hint">Pin the four corners of the garage door opening on the live image. We'll solve for the camera position and orientation that fits those pins.</div>
+                  <button class="calib-btn" id="pose-pin-open" type="button">Pin door corners on image</button>
                 </section>
 
                 <!-- Tab: Thresholds -->
@@ -445,6 +449,26 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="pose-overlay hidden" id="pose-overlay">
+      <div class="pose-bar pose-bar--top">
+        <div>
+          <div class="pose-title">POSE CALIBRATION</div>
+          <div class="pose-sub">Drag each pin to the matching corner of the garage door opening.</div>
+        </div>
+        <button class="calib-close" id="pose-close" aria-label="Close">×</button>
+      </div>
+      <div class="pose-stage" id="pose-stage">
+        <img id="pose-image" alt="" />
+        <svg class="pose-svg" id="pose-svg" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="pose-bar pose-bar--bottom">
+        <div class="pose-stat"><span class="pose-stat-label">Residual</span><span class="pose-stat-value" id="pose-residual">—</span></div>
+        <div class="pose-stat"><span class="pose-stat-label">FOV</span><span class="pose-stat-value" id="pose-fov-readout">—</span></div>
+        <div class="pose-stat"><span class="pose-stat-label">Image</span><span class="pose-stat-value" id="pose-imgsize">—</span></div>
+        <button class="calib-btn calib-btn--ghost" id="pose-reset" type="button">Reset pins</button>
+      </div>
+    </div>
 
     <div class="auth-overlay hidden" id="auth-overlay">
       <div class="auth-card">

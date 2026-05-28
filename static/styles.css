@@ -50,6 +50,139 @@ body {
 
 .hidden { display: none !important; }
 
+/* ─── Pose calibration overlay ────────────────────────── */
+.pose-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  background:
+    radial-gradient(ellipse at top, rgba(98, 231, 255, 0.06), transparent 60%),
+    rgba(2, 5, 10, 0.96);
+  backdrop-filter: blur(6px);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  color: var(--text);
+}
+
+.pose-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(7, 12, 20, 0.7);
+  gap: 16px;
+}
+
+.pose-bar--bottom {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.pose-title {
+  font-size: 11px;
+  letter-spacing: 0.28em;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.pose-sub {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+
+.pose-stage {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.pose-stage img {
+  max-width: 100%;
+  max-height: 100%;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+}
+
+.pose-svg {
+  position: absolute;
+  /* Sized to match the image via JS */
+  pointer-events: none;
+  overflow: visible;
+}
+
+.pose-svg .pin {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.pose-svg .pin.dragging { cursor: grabbing; }
+
+.pose-svg .pin-ring {
+  fill: rgba(98, 231, 255, 0.12);
+  stroke: var(--accent);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px rgba(98, 231, 255, 0.6));
+}
+
+.pose-svg .pin.dragging .pin-ring {
+  fill: rgba(98, 231, 255, 0.35);
+  stroke-width: 3;
+}
+
+.pose-svg .pin-cross {
+  stroke: var(--accent);
+  stroke-width: 1.2;
+}
+
+.pose-svg .pin-label {
+  fill: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+}
+
+.pose-svg .pin-line {
+  stroke: rgba(98, 231, 255, 0.5);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  fill: none;
+  pointer-events: none;
+}
+
+.pose-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pose-stat-label {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.pose-stat-value {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text);
+}
+
 /* ─── Toast (transient notifications) ─────────────────── */
 .toast {
   position: fixed;
