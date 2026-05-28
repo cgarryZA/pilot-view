@@ -8,15 +8,24 @@ Node system (matches the UI):
             node's *direction* from its blue corner is meaningful.
   * YELLOW — the 4 exact corners of the garage-door opening (used for door dims).
 
-How FOV is found: the four receding edges are all parallel (+Z) and the room is
-rectangular (90° corners). For a candidate FOV we solve the camera pose from the
-back-wall rectangle (IPPE — a planar target), project the near corners (z=length),
-and measure how well each projected receding edge's *direction* matches the user's
-BLUE→WHITE direction. The FOV that minimises that angular error is the answer.
-This is why FOV is computed, not slid.
+How pose + FOV are found: a back-wall rectangle alone is an ill-conditioned PnP
+target for a down-the-corridor view — the wall is nearly fronto-parallel and
+distant, so tiny pin errors throw the focal length (FOV) and pose wildly. IPPE
+will happily fit *any* FOV to a planar quad, which is exactly why solving FOV
+from the back wall by itself produces garbage.
+
+The fix: solve pose AND focal length together in one least-squares problem that
+uses BOTH constraints the user actually drew —
+  (a) the 4 BLUE corners must reproject onto the known back-wall rectangle, and
+  (b) each receding edge, when projected, must point along the user's BLUE→WHITE
+      direction (the room's +Z axis as seen in the image).
+Constraint (b) is what pins the FOV: the only focal length that makes all four
+parallel +Z edges appear to recede at the drawn angles is the true one. We
+initialise from an IPPE pose on the back wall (camera-above-floor branch) at a
+~60° FOV guess and let scipy.optimize.least_squares refine [rvec, tvec, f].
 
 If the caller supplies a known FOV (e.g. read from the real Gemini 2's
-intrinsics), we skip the search and just solve the pose at that FOV.
+intrinsics), we fix the focal length and only refine the 6-DoF pose.
 
 Returns a Three.js-ready (position, look_at, up). up is derived from the solved
 rotation so the OpenCV(+Y-down) → Three.js(+Y-up) conversion is exact.
@@ -26,6 +35,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import cv2
+from scipy.optimize import least_squares
 
 # Pin order for back + near (paired): top-left, top-right, bottom-right, bottom-left.
 CORNER_ORDER = ["tl", "tr", "br", "bl"]
@@ -70,26 +80,21 @@ def intrinsics(image_size_px: Tuple[int, int], fov_deg: float) -> np.ndarray:
     return np.array([[fx, 0, w / 2.0], [0, fy, h / 2.0], [0, 0, 1.0]], dtype=np.float64)
 
 
-def _ippe_back_wall(back_img: np.ndarray, back_world: np.ndarray, K: np.ndarray):
-    """Pose from the back-wall rectangle; pick the physically valid mirror solution."""
-    n, rvecs, tvecs, reproj = cv2.solvePnPGeneric(
-        back_world, back_img, K, np.zeros(4), flags=cv2.SOLVEPNP_IPPE
-    )
-    if n < 1:
-        return None
-    best = None
-    for i in range(n):
-        R, _ = cv2.Rodrigues(rvecs[i])
-        cam = (-R.T @ tvecs[i]).flatten()
-        # reproj[i] is an array (numpy 2.x rejects float() on non-0d arrays).
-        err = float(np.ravel(reproj[i])[0]) if reproj is not None else 0.0
-        score = (1000.0 if cam[1] > 0 else 0.0) - err   # prefer camera above floor
-        if best is None or score > best[0]:
-            best = (score, rvecs[i], tvecs[i])
-    return best[1], best[2]
+def _f_from_fov(h: float, fov_deg: float) -> float:
+    return (h / 2.0) / np.tan(np.deg2rad(fov_deg) / 2.0)
 
 
-def _edge_direction_error(K, rvec, tvec, back_world, near_world, drawn_dir) -> float:
+def _fov_from_f(h: float, f: float) -> float:
+    return float(np.rad2deg(2.0 * np.arctan((h / 2.0) / f)))
+
+
+def _K_from_f(f: float, cx: float, cy: float) -> np.ndarray:
+    return np.array([[f, 0.0, cx], [0.0, f, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+
+
+def _direction_error(K, rvec, tvec, back_world, near_world, drawn_dir) -> float:
+    """Mean (1 - cos θ) between each projected +Z receding edge and the user's
+    BLUE→WHITE direction. 0 = perfect, 2 = pointing the opposite way."""
     bp, _ = cv2.projectPoints(back_world, rvec, tvec, K, np.zeros(4))
     npj, _ = cv2.projectPoints(near_world, rvec, tvec, K, np.zeros(4))
     bp = bp.reshape(-1, 2)
@@ -98,12 +103,36 @@ def _edge_direction_error(K, rvec, tvec, back_world, near_world, drawn_dir) -> f
     for i in range(4):
         d = npj[i] - bp[i]
         nn = np.linalg.norm(d)
-        if nn < 1e-6:
+        if nn < 1e-9:
             total += 1.0
             continue
         d /= nn
-        total += 1.0 - float(np.dot(d, drawn_dir[i]))   # 0 = perfect, 2 = opposite
-    return total
+        total += 1.0 - float(np.dot(d, drawn_dir[i]))
+    return total / 4.0
+
+
+def _ippe_back_wall(back_img, back_world, near_world, drawn_dir, K):
+    """Pose from the back-wall rectangle; choose the mirror branch whose receding
+    edges point the way the user drew (with camera-above-floor as a tiebreak).
+
+    Used only to *initialise* the joint optimiser — IPPE on a planar quad is not
+    trusted for the final answer.
+    """
+    n, rvecs, tvecs, _ = cv2.solvePnPGeneric(
+        back_world, back_img, K, np.zeros(4), flags=cv2.SOLVEPNP_IPPE
+    )
+    if n < 1:
+        return None
+    best = None
+    for i in range(n):
+        R, _ = cv2.Rodrigues(rvecs[i])
+        cam = (-R.T @ tvecs[i]).flatten()
+        dir_err = _direction_error(K, rvecs[i], tvecs[i], back_world, near_world, drawn_dir)
+        # Lower is better: direction agreement dominates, tiny nudge for cam-above-floor.
+        score = dir_err - (0.05 if cam[1] > 0 else 0.0)
+        if best is None or score < best[0]:
+            best = (score, rvecs[i], tvecs[i])
+    return best[1], best[2]
 
 
 def _pose_to_threejs(rvec, tvec):
@@ -130,6 +159,44 @@ def _backproject_to_z0(image_points, K, rvec, tvec):
     return out
 
 
+def _make_residuals(back_world, near_world, back_img, drawn_dir,
+                    cx, cy, diag, fixed_f):
+    """Build the residual function for least_squares.
+
+    Residuals (all in pixel-equivalent units so they're comparably weighted):
+      * 8 — back-wall corner reprojection error (x,y for 4 BLUE corners).
+      * 8 — receding-edge direction error: the projected +Z edge at each corner
+            must align with the user's BLUE→WHITE unit direction. We use the
+            difference of the two unit vectors (magnitude ≈ angular error in rad)
+            scaled by the image diagonal so a 1° miss ≈ diag·(π/180) px.
+    """
+    rvec0_shape = (3, 1)
+
+    def residuals(params):
+        rvec = np.asarray(params[0:3], dtype=np.float64).reshape(rvec0_shape)
+        tvec = np.asarray(params[3:6], dtype=np.float64).reshape(rvec0_shape)
+        f = fixed_f if fixed_f is not None else float(params[6])
+        K = _K_from_f(f, cx, cy)
+
+        bp, _ = cv2.projectPoints(back_world, rvec, tvec, K, np.zeros(4))
+        npj, _ = cv2.projectPoints(near_world, rvec, tvec, K, np.zeros(4))
+        bp = bp.reshape(-1, 2)
+        npj = npj.reshape(-1, 2)
+
+        res = list((bp - back_img).ravel())
+        for i in range(4):
+            d = npj[i] - bp[i]
+            nn = np.linalg.norm(d)
+            if nn < 1e-9:
+                res.extend([diag, diag])
+                continue
+            d = d / nn
+            res.extend(((d - drawn_dir[i]) * diag).tolist())
+        return np.asarray(res, dtype=np.float64)
+
+    return residuals
+
+
 def solve_full(
     back_image_points: List[Tuple[float, float]],
     near_image_points: List[Tuple[float, float]],
@@ -143,6 +210,10 @@ def solve_full(
     if len(back_image_points) != 4 or len(near_image_points) != 4:
         raise ValueError("need 4 back points and 4 near direction points")
 
+    w_px, h_px = image_size_px
+    cx, cy = w_px / 2.0, h_px / 2.0
+    diag = float(np.hypot(w_px, h_px))
+
     back_world = back_wall_world(garage_w, garage_h)
     near_world = near_wall_world(garage_w, garage_h, garage_l)
     back_img = np.array(back_image_points, dtype=np.float64)
@@ -153,38 +224,48 @@ def solve_full(
     norms[norms < 1e-6] = 1.0
     drawn_dir = drawn / norms
 
-    def solve_at(fov):
-        K = intrinsics(image_size_px, fov)
-        res = _ippe_back_wall(back_img, back_world, K)
-        if res is None:
-            return None
-        rvec, tvec = res
-        err = _edge_direction_error(K, rvec, tvec, back_world, near_world, drawn_dir)
-        return (err, fov, rvec, tvec, K)
+    have_fov = bool(known_fov_deg and known_fov_deg > 0)
 
-    if known_fov_deg and known_fov_deg > 0:
-        chosen = solve_at(float(known_fov_deg))
-        if chosen is None:
-            raise ValueError("pose solve failed at the camera's FOV")
+    # ── initialise pose from IPPE on the back wall (camera-above-floor branch) ──
+    init_fov = float(known_fov_deg) if have_fov else 60.0
+    K_init = intrinsics(image_size_px, init_fov)
+    init = _ippe_back_wall(back_img, back_world, near_world, drawn_dir, K_init)
+    if init is None:
+        raise ValueError("pose solve failed — check back-wall pins")
+    rvec0, tvec0 = init
+    f_init = _f_from_fov(h_px, init_fov)
+
+    fixed_f = f_init if have_fov else None
+    residuals = _make_residuals(
+        back_world, near_world, back_img, drawn_dir, cx, cy, diag, fixed_f
+    )
+
+    if have_fov:
+        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0)])
+        sol = least_squares(residuals, x0, method="lm", max_nfev=400)
+        params = sol.x
+        f_solved = f_init
         fov_solved = False
     else:
-        # Coarse search then refine — find the FOV whose receding edges match.
-        best = None
-        for fov in np.arange(25.0, 120.5, 1.0):
-            cand = solve_at(fov)
-            if cand and (best is None or cand[0] < best[0]):
-                best = cand
-        if best is None:
-            raise ValueError("pose solve failed — check back-wall pins")
-        f0 = best[1]
-        for fov in np.arange(max(25.0, f0 - 2.0), min(120.0, f0 + 2.0) + 0.01, 0.25):
-            cand = solve_at(fov)
-            if cand and cand[0] < best[0]:
-                best = cand
-        chosen = best
+        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0), [f_init]])
+        # Keep focal length inside FOV ∈ [10°, 150°] so it can't run away.
+        f_lo = _f_from_fov(h_px, 150.0)
+        f_hi = _f_from_fov(h_px, 10.0)
+        lower = np.array([-np.inf] * 6 + [f_lo])
+        upper = np.array([np.inf] * 6 + [f_hi])
+        sol = least_squares(
+            residuals, x0, method="trf", bounds=(lower, upper),
+            x_scale="jac", max_nfev=600,
+        )
+        params = sol.x
+        f_solved = float(params[6])
         fov_solved = True
 
-    _, fov, rvec, tvec, K = chosen
+    rvec = np.asarray(params[0:3], dtype=np.float64).reshape(3, 1)
+    tvec = np.asarray(params[3:6], dtype=np.float64).reshape(3, 1)
+    K = _K_from_f(f_solved, cx, cy)
+    fov = _fov_from_f(h_px, f_solved)
+
     cam_pos, look_at, up = _pose_to_threejs(rvec, tvec)
 
     bp, _ = cv2.projectPoints(back_world, rvec, tvec, K, np.zeros(4))
