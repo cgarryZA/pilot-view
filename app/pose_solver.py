@@ -256,15 +256,22 @@ def solve_full(
         if init is None:
             return None
         rvec0, tvec0 = init
+        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0)])
+        if not np.all(np.isfinite(x0)):
+            return None  # IPPE degenerate at this FOV — skip this candidate
         residuals = _make_residuals(
             back_world, near_world, back_img, drawn_dir, cx, cy, diag,
             fixed_f=_f_from_fov(h_px, fov_deg),
         )
-        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0)])
-        sol = least_squares(residuals, x0, method="lm", max_nfev=300)
+        try:
+            sol = least_squares(residuals, x0, method="lm", max_nfev=300)
+        except (ValueError, np.linalg.LinAlgError):
+            return None
         rvec = sol.x[0:3].reshape(3, 1)
         tvec = sol.x[3:6].reshape(3, 1)
         dir_err = _direction_error(K, rvec, tvec, back_world, near_world, drawn_dir)
+        if not np.isfinite(dir_err):
+            return None
         return rvec, tvec, dir_err
 
     if have_fov:
