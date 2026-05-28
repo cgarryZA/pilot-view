@@ -128,7 +128,6 @@ body {
 }
 
 .pose-svg .pin.dragging { cursor: grabbing; }
-.pose-svg .pin--guide { pointer-events: none; opacity: 0.85; }
 
 /* Group colours: back = cyan (primary), near = grey (seam guides), door = amber */
 .pose-svg .pin--back .pin-ring  { stroke: var(--accent); fill: rgba(98, 231, 255, 0.12); }

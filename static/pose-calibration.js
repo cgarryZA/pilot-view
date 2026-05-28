@@ -6,12 +6,13 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // Node order MUST match the backend's ROOM_ORDER + DOOR_ORDER.
 //   room (8): near_tl,tr,br,bl  then  back_tl,tr,br,bl
 //   door (4): door_tl,tr,br,bl
-// near corners are computed guides (not draggable); back + door are draggable.
+// All 12 nodes are draggable. The near corners (placed along the wall seams)
+// are what capture an off-centre / off-axis camera in the solve.
 const NODES = [
-  { key: 'near_tl', label: 'TL', group: 'near', draggable: false },
-  { key: 'near_tr', label: 'TR', group: 'near', draggable: false },
-  { key: 'near_br', label: 'BR', group: 'near', draggable: false },
-  { key: 'near_bl', label: 'BL', group: 'near', draggable: false },
+  { key: 'near_tl', label: 'TL', group: 'near', draggable: true },
+  { key: 'near_tr', label: 'TR', group: 'near', draggable: true },
+  { key: 'near_br', label: 'BR', group: 'near', draggable: true },
+  { key: 'near_bl', label: 'BL', group: 'near', draggable: true },
   { key: 'back_tl', label: 'TL', group: 'back', draggable: true },
   { key: 'back_tr', label: 'TR', group: 'back', draggable: true },
   { key: 'back_br', label: 'BR', group: 'back', draggable: true },
@@ -66,12 +67,19 @@ function projectWith(camPos, lookAt, fov, worldPts, imgW, imgH) {
 
 function projectAll(cal, imgW, imgH) {
   const lv = cal?.live_view || {};
-  return projectWith(
+  const pts = projectWith(
     lv.camera_position || { x: 0, y: 1.45, z: 5.6 },
     lv.camera_look_at || { x: 0, y: 0.6, z: 0 },
     lv.camera_fov_deg || 50,
     worldPoints(cal), imgW, imgH,
   );
+  // Clamp to a grabbable on-screen band — a bad initial pose (or near corners
+  // that project beyond the frame) would otherwise put pins out of reach.
+  const m = 24;
+  return pts.map((p) => ({
+    x: Math.max(m, Math.min(imgW - m, p.x)),
+    y: Math.max(m, Math.min(imgH - m, p.y)),
+  }));
 }
 
 export function createPoseCalibration({ onPoseApplied }) {
@@ -182,46 +190,36 @@ export function createPoseCalibration({ onPoseApplied }) {
     g.removeEventListener('pointerup', onPinUp);
     g.removeEventListener('pointercancel', onPinUp);
     drag = null;
-    // Live preview: solve (without saving) and reposition the grey guide
-    // corners so you can see the box align. Apply persists.
-    previewSolve();
+    // Preview the residual (doesn't move pins or save) so you get instant
+    // feedback on fit quality without your placement being overwritten.
+    previewResidual();
   }
 
   let previewTimer = null;
-  function previewSolve() {
+  function previewResidual() {
     if (previewTimer) clearTimeout(previewTimer);
-    previewTimer = setTimeout(doPreviewSolve, 100);
-  }
-
-  async function doPreviewSolve() {
-    const fov = currentCal?.live_view?.camera_fov_deg || 50;
-    try {
-      const res = await fetch('/api/calibration/solve_pose', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
-          door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
-          image_size: { width: imageSize.w, height: imageSize.h },
-          fov_deg: fov,
-          apply: false,
-        }),
-      });
-      if (!res.ok) { residualEl.textContent = 'error'; return; }
-      const data = await res.json();
-      residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
-      // Reproject the 4 near guide corners from the solved pose.
-      const nearWorld = worldPoints(currentCal).slice(0, 4);
-      const near = projectWith(
-        data.camera_position, data.camera_look_at, fov,
-        nearWorld, imageSize.w, imageSize.h,
-      );
-      for (let i = 0; i < 4; i++) pins[i] = near[i];
-      updatePinPositions();
-    } catch (err) {
-      console.error('[pose] preview failed', err);
-    }
+    previewTimer = setTimeout(async () => {
+      const fov = currentCal?.live_view?.camera_fov_deg || 50;
+      try {
+        const res = await fetch('/api/calibration/solve_pose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
+            door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
+            image_size: { width: imageSize.w, height: imageSize.h },
+            fov_deg: fov,
+            apply: false,
+          }),
+        });
+        if (!res.ok) { residualEl.textContent = 'error'; return; }
+        const data = await res.json();
+        residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
+      } catch {
+        residualEl.textContent = 'error';
+      }
+    }, 120);
   }
 
   function clientToImage(clientX, clientY) {
