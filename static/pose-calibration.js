@@ -92,6 +92,7 @@ export function createPoseCalibration({ onPoseApplied }) {
   const resetBtn = $('pose-reset');
   const residualEl = $('pose-residual');
   const fovReadoutEl = $('pose-fov-readout');
+  const fovSlider = $('pose-fov-slider');
   const imgSizeEl = $('pose-imgsize');
 
   let pins = [];
@@ -99,6 +100,7 @@ export function createPoseCalibration({ onPoseApplied }) {
   let edgeEls = [];
   let imageSize = { w: 0, h: 0 };
   let currentCal = null;
+  let currentFov = 50;
 
   function render() {
     if (!imageSize.w || !imageSize.h) return;
@@ -199,7 +201,6 @@ export function createPoseCalibration({ onPoseApplied }) {
   function previewResidual() {
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = setTimeout(async () => {
-      const fov = currentCal?.live_view?.camera_fov_deg || 50;
       try {
         const res = await fetch('/api/calibration/solve_pose', {
           method: 'POST',
@@ -209,7 +210,7 @@ export function createPoseCalibration({ onPoseApplied }) {
             room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
             door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
             image_size: { width: imageSize.w, height: imageSize.h },
-            fov_deg: fov,
+            fov_deg: currentFov,
             apply: false,
           }),
         });
@@ -219,7 +220,23 @@ export function createPoseCalibration({ onPoseApplied }) {
       } catch {
         residualEl.textContent = 'error';
       }
-    }, 120);
+    }, 100);
+  }
+
+  function setFov(v, { persist = false } = {}) {
+    currentFov = v;
+    fovReadoutEl.textContent = `${v}°`;
+    if (fovSlider.value !== String(v)) fovSlider.value = String(v);
+    previewResidual();
+    if (persist) {
+      fetch('/api/calibration', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ live_view: { camera_fov_deg: v } }),
+      }).catch((err) => console.error('[pose] fov persist failed', err));
+      if (currentCal?.live_view) currentCal.live_view.camera_fov_deg = v;
+    }
   }
 
   function clientToImage(clientX, clientY) {
@@ -231,7 +248,6 @@ export function createPoseCalibration({ onPoseApplied }) {
   }
 
   async function apply() {
-    const fov = currentCal?.live_view?.camera_fov_deg || 50;
     applyBtn.disabled = true;
     applyBtn.textContent = 'Solving…';
     try {
@@ -243,7 +259,7 @@ export function createPoseCalibration({ onPoseApplied }) {
           room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
           door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
           image_size: { width: imageSize.w, height: imageSize.h },
-          fov_deg: fov,
+          fov_deg: currentFov,
         }),
       });
       if (!res.ok) {
@@ -274,7 +290,9 @@ export function createPoseCalibration({ onPoseApplied }) {
     await imageLoaded(imgEl);
     imageSize = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
     imgSizeEl.textContent = `${imageSize.w}×${imageSize.h}`;
-    fovReadoutEl.textContent = `${(cal?.live_view?.camera_fov_deg || 50).toFixed(0)}°`;
+    currentFov = Math.round(cal?.live_view?.camera_fov_deg || 50);
+    fovSlider.value = String(currentFov);
+    fovReadoutEl.textContent = `${currentFov}°`;
     pins = projectAll(cal, imageSize.w, imageSize.h);
     residualEl.textContent = '—';
     overlay.classList.remove('hidden');
@@ -300,6 +318,9 @@ export function createPoseCalibration({ onPoseApplied }) {
   closeBtn.addEventListener('click', close);   // X = cancel
   applyBtn.addEventListener('click', apply);   // Apply = solve + close
   resetBtn.addEventListener('click', reset);
+  // FOV: live residual update while dragging, persist on release.
+  fovSlider.addEventListener('input', () => setFov(parseInt(fovSlider.value, 10)));
+  fovSlider.addEventListener('change', () => setFov(parseInt(fovSlider.value, 10), { persist: true }));
   window.addEventListener('resize', () => {
     if (!overlay.classList.contains('hidden')) render();
   });

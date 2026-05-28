@@ -170,6 +170,38 @@ body {
 .pose-key--near { color: #8aa0b5; }
 .pose-key--door { color: var(--warn); }
 
+.pose-fov { display: flex; align-items: center; gap: 10px; }
+.pose-fov input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(148, 173, 198, 0.25);
+  outline: none;
+  cursor: pointer;
+}
+.pose-fov input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  cursor: grab;
+}
+.pose-fov input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+  cursor: grab;
+}
+.pose-fov .pose-stat-value { min-width: 40px; }
+
 .pose-stat {
   display: flex;
   flex-direction: column;

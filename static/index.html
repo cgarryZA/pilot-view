@@ -469,7 +469,11 @@
       </div>
       <div class="pose-bar pose-bar--bottom">
         <div class="pose-stat"><span class="pose-stat-label">Residual</span><span class="pose-stat-value" id="pose-residual">—</span></div>
-        <div class="pose-stat"><span class="pose-stat-label">FOV</span><span class="pose-stat-value" id="pose-fov-readout">—</span></div>
+        <div class="pose-stat pose-fov">
+          <span class="pose-stat-label">FOV</span>
+          <input type="range" id="pose-fov-slider" min="20" max="120" step="1" />
+          <span class="pose-stat-value" id="pose-fov-readout">—</span>
+        </div>
         <div class="pose-stat"><span class="pose-stat-label">Image</span><span class="pose-stat-value" id="pose-imgsize">—</span></div>
         <button class="calib-btn calib-btn--ghost" id="pose-reset" type="button">Reset pins</button>
         <button class="calib-btn" id="pose-apply" type="button">Apply</button>
