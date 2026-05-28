@@ -286,20 +286,37 @@ def solve_full(
         # No intrinsics: find the FOV whose receding edges best match the drawn
         # directions. A 1-D argmin over well-conditioned pose solves — stable,
         # never runs away (unlike a free joint optimisation).
-        best = None  # (dir_err, fov, rvec, tvec)
-        for fov_deg in np.arange(25.0, 120.5, 1.0):
+        #
+        # Caveat (physics, not code): a near-fronto-parallel back wall gives a
+        # WEAK focal-length signal — a pixel of pin jitter can swing the best-fit
+        # FOV by tens of degrees and rail it to an absurd value. So we (a) clamp
+        # the search to plausible camera FOVs and (b) add a gentle prior toward a
+        # typical lens. With clean pins the direction term dominates and recovers
+        # the true FOV exactly; with noisy pins the prior keeps the answer sane.
+        # The honest fix for precision is to supply the real camera FOV.
+        FOV_LO, FOV_HI = 35.0, 100.0
+        PRIOR_FOV = 60.0
+        reg = 0.01  # weight of the (fov-prior)^2 prior, in dir-error units
+
+        def scored(fov_deg):
             out = solve_pose_at_fov(fov_deg)
             if out is None:
-                continue
-            if best is None or out[2] < best[0]:
-                best = (out[2], fov_deg, out[0], out[1])
+                return None
+            penalty = reg * ((fov_deg - PRIOR_FOV) / 30.0) ** 2
+            return (out[2] + penalty, fov_deg, out[0], out[1])
+
+        best = None  # (score, fov, rvec, tvec)
+        for fov_deg in np.arange(FOV_LO, FOV_HI + 0.5, 1.0):
+            cand = scored(fov_deg)
+            if cand is not None and (best is None or cand[0] < best[0]):
+                best = cand
         if best is None:
             raise ValueError("pose solve failed — check back-wall pins")
         f0 = best[1]
-        for fov_deg in np.arange(max(25.0, f0 - 2.0), min(120.0, f0 + 2.0) + 0.01, 0.25):
-            out = solve_pose_at_fov(fov_deg)
-            if out is not None and out[2] < best[0]:
-                best = (out[2], fov_deg, out[0], out[1])
+        for fov_deg in np.arange(max(FOV_LO, f0 - 2.0), min(FOV_HI, f0 + 2.0) + 0.01, 0.25):
+            cand = scored(fov_deg)
+            if cand is not None and cand[0] < best[0]:
+                best = cand
         _, fov, rvec, tvec = best
         fov_solved = True
 
