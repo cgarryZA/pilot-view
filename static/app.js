@@ -203,6 +203,35 @@ async function toggleLights() {
 els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
 
+// ─── Source switcher ─────────────────────────────────
+const SOURCE_CYCLE = ['synthetic', 'orbbec', 'disconnected'];
+
+async function cycleSource() {
+  // Determine current from the pill text (uppercased server-side value).
+  const currentLabel = (els.sourcePill.querySelector('.pill-text')?.textContent || '').toLowerCase();
+  const idx = SOURCE_CYCLE.indexOf(currentLabel);
+  const next = SOURCE_CYCLE[(idx + 1) % SOURCE_CYCLE.length];
+  try {
+    const res = await fetch('/api/source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: next }),
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      showToast(body.detail || `Source switch failed: HTTP ${res.status}`, 'danger');
+      return;
+    }
+    const data = await res.json();
+    showToast(`Source: ${data.current}`, 'info', 1800);
+  } catch (err) {
+    showToast(`Source switch error: ${err.message || err}`, 'danger');
+  }
+}
+
+els.sourcePill.addEventListener('click', cycleSource);
+
 let currentActiveVehicle = null;
 
 // Drop any stale quality-cycler preferences from when the temporary pill existed.

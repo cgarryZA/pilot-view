@@ -12,7 +12,7 @@ from app.door import door
 from app.lights import lights
 from app.passkeys import SESSION_COOKIE_NAME, sessions
 from app.sensors import sensors
-from app.sources import source
+from app.sources import SOURCE_NAMES, source_manager
 from app.vehicles import vehicles
 
 automations.install()
@@ -136,8 +136,27 @@ async def set_active_vehicle(payload: dict, _=Depends(require_auth)):
     return vehicles.set_active(payload["id"])
 
 
+@app.get("/api/source")
+def get_source(_=Depends(require_auth)):
+    return {"current": source_manager.name, "available": list(SOURCE_NAMES)}
+
+
+@app.post("/api/source")
+async def set_source(payload: dict, _=Depends(require_auth)):
+    name = (payload or {}).get("name")
+    if not isinstance(name, str):
+        raise HTTPException(400, "expected {'name': '<source>'}")
+    try:
+        new_name = source_manager.switch(name)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"failed to switch source: {exc}")
+    return {"current": new_name, "available": list(SOURCE_NAMES)}
+
+
 def _ws_payload() -> dict:
-    payload = source.state()
+    payload = source_manager.state()
     payload["door"] = door.status_dict()
     payload["lights"] = lights.status_dict()
     payload["environment"] = sensors.read()

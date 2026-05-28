@@ -9,7 +9,7 @@ from typing import Optional
 
 from app.door import CLOSED, door
 from app.lights import lights
-from app.sources import source
+from app.sources import source_manager
 
 # Minimum gap between the rear of the car bounding box and the entrance plane
 # before we'll allow the door to operate. A small buffer protects against
@@ -33,7 +33,7 @@ def install() -> None:
     # how bodywork gets damaged. ──
     def guard_vehicle_clipping_entrance() -> Optional[str]:
         try:
-            state = source.state()
+            state = source_manager.state()
         except Exception:
             return None  # don't block if we can't read state
         geom = state.get("geometry")
