@@ -42,6 +42,9 @@ DEFAULTS: dict[str, Any] = {
         # vertically inside this rectangle. Sensible UK single-garage default.
         "door_opening_width": 2.4,
         "door_opening_height": 2.0,
+        # Horizontal offset of the door centre from the garage centreline
+        # (0 = centred). Set by pose calibration if the door is off-centre.
+        "door_center_x": 0.0,
     },
     "vehicles": {
         "active_id": "lambo",

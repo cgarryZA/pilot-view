@@ -71,58 +71,65 @@ def reset_calibration(_=Depends(require_auth)):
 
 @app.post("/api/calibration/solve_pose")
 async def solve_pose(payload: dict, _=Depends(require_auth)):
-    """Solve camera pose from 4 image-point pins.
+    """Solve camera pose from 8 room-corner pins + derive door from 4 door pins.
 
     Input:
       {
-        "image_points": [[u,v], [u,v], [u,v], [u,v]],   // bottom-L, BR, TR, TL
-        "image_size":   {"width": int, "height": int},
-        "fov_deg":      float,
-        "door_opening": {"width": float, "height": float}  // optional, defaults from calibration
+        "room_points": [[u,v] x8],   // near_tl,tr,br,bl, back_tl,tr,br,bl
+        "door_points": [[u,v] x4],   // door_tl,tr,br,bl  (optional)
+        "image_size":  {"width": int, "height": int},
+        "fov_deg":     float
       }
     """
     if not isinstance(payload, dict):
         raise HTTPException(400, "expected JSON object")
     try:
-        pts = payload["image_points"]
+        room = payload["room_points"]
+        door = payload.get("door_points") or []
         size = payload["image_size"]
         fov = float(payload.get("fov_deg") or 50.0)
-        door = payload.get("door_opening") or {}
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, f"invalid payload: {exc}")
 
-    if not isinstance(pts, list) or len(pts) != 4 or any(len(p) != 2 for p in pts):
-        raise HTTPException(400, "image_points must be a list of 4 [u, v] pairs")
+    if not isinstance(room, list) or len(room) != 8 or any(len(p) != 2 for p in room):
+        raise HTTPException(400, "room_points must be a list of 8 [u, v] pairs")
 
     cal = calibration.load()
     garage = cal.get("garage", {})
-    door_w = float(door.get("width") or garage.get("door_opening_width") or 2.4)
-    door_h = float(door.get("height") or garage.get("door_opening_height") or 2.0)
-
-    world_points = pose_solver.door_opening_world_corners(door_w, door_h)
     image_size = (int(size["width"]), int(size["height"]))
-    image_points = [(float(u), float(v)) for u, v in pts]
+    room_pts = [(float(u), float(v)) for u, v in room]
+    door_pts = [(float(u), float(v)) for u, v in door] if len(door) == 4 else []
 
     try:
-        result = pose_solver.solve_camera_pose(
-            image_points=image_points,
+        result = pose_solver.solve_full(
+            room_image_points=room_pts,
+            door_image_points=door_pts,
             image_size_px=image_size,
-            world_points=world_points,
             fov_deg=fov,
+            garage_w=float(garage.get("width", 3.0)),
+            garage_l=float(garage.get("length", 5.8)),
+            garage_h=float(garage.get("height", 2.3)),
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
 
-    # Persist into live_view automatically — caller can refuse this by saving
-    # the values explicitly via PUT instead. Atomic for the user: drag → solve → applied.
-    calibration.save({
+    updates = {
         "live_view": {
             "camera_position": result["camera_position"],
             "camera_look_at":  result["camera_look_at"],
             "camera_fov_deg":  fov,
         },
-    })
+    }
+    # Apply derived door dimensions if back-projection succeeded.
+    garage_updates = {}
+    if "door_opening_width" in result:
+        garage_updates["door_opening_width"] = result["door_opening_width"]
+        garage_updates["door_opening_height"] = result["door_opening_height"]
+        garage_updates["door_center_x"] = result["door_center_x"]
+    if garage_updates:
+        updates["garage"] = garage_updates
 
+    calibration.save(updates)
     return result
 
 

@@ -1,11 +1,37 @@
 import * as THREE from 'https://esm.sh/three@0.169.0';
 
 const $ = (id) => document.getElementById(id);
-
-// Pin labels (display) mapped to door-opening world corners in the order the
-// backend expects: bottom-left, bottom-right, top-right, top-left.
-const PIN_LABELS = ['BL', 'BR', 'TR', 'TL'];
 const SVG_NS = 'http://www.w3.org/2000/svg';
+
+// Node order MUST match the backend's ROOM_ORDER + DOOR_ORDER.
+//   room (8): near_tl,tr,br,bl  then  back_tl,tr,br,bl
+//   door (4): door_tl,tr,br,bl
+const NODES = [
+  { key: 'near_tl', label: 'TL', group: 'near' },
+  { key: 'near_tr', label: 'TR', group: 'near' },
+  { key: 'near_br', label: 'BR', group: 'near' },
+  { key: 'near_bl', label: 'BL', group: 'near' },
+  { key: 'back_tl', label: 'TL', group: 'back' },
+  { key: 'back_tr', label: 'TR', group: 'back' },
+  { key: 'back_br', label: 'BR', group: 'back' },
+  { key: 'back_bl', label: 'BL', group: 'back' },
+  { key: 'door_tl', label: 'TL', group: 'door' },
+  { key: 'door_tr', label: 'TR', group: 'door' },
+  { key: 'door_br', label: 'BR', group: 'door' },
+  { key: 'door_bl', label: 'BL', group: 'door' },
+];
+
+// Edges to draw (indices into NODES) — the garage cuboid + door rectangle.
+const EDGES = [
+  // near rectangle
+  [0, 1], [1, 2], [2, 3], [3, 0],
+  // back rectangle
+  [4, 5], [5, 6], [6, 7], [7, 4],
+  // connecting seams (near→back)
+  [0, 4], [1, 5], [2, 6], [3, 7],
+  // door rectangle
+  [8, 9], [9, 10], [10, 11], [11, 8],
+];
 
 function nsel(name, attrs = {}) {
   const el = document.createElementNS(SVG_NS, name);
@@ -13,37 +39,35 @@ function nsel(name, attrs = {}) {
   return el;
 }
 
-function projectCornersToImage(cal, imgW, imgH) {
-  /** Compute initial pin positions by projecting the 4 door-opening world
-   * corners with a Three.js camera built from the current calibration. */
-  const lv = cal?.live_view || {};
-  const garage = cal?.garage || {};
-  const doorW = garage.door_opening_width || 2.4;
-  const doorH = garage.door_opening_height || 2.0;
+function worldPoints(cal) {
+  const g = cal?.garage || {};
+  const W = g.width || 3.0, L = g.length || 5.8, H = g.height || 2.3;
+  const dw = g.door_opening_width || 2.4, dh = g.door_opening_height || 2.0;
+  const cx = g.door_center_x || 0.0;
+  const hw = W / 2, hdw = dw / 2;
+  return [
+    [-hw, H, L], [hw, H, L], [hw, 0, L], [-hw, 0, L],   // near (z=L)
+    [-hw, H, 0], [hw, H, 0], [hw, 0, 0], [-hw, 0, 0],   // back (z=0)
+    [cx - hdw, dh, 0], [cx + hdw, dh, 0], [cx + hdw, 0, 0], [cx - hdw, 0, 0],  // door (z=0)
+  ];
+}
 
+function projectAll(cal, imgW, imgH) {
+  const lv = cal?.live_view || {};
   const fov = lv.camera_fov_deg || 50;
-  const aspect = imgW / imgH;
-  const cam = new THREE.PerspectiveCamera(fov, aspect, 0.05, 200);
+  const cam = new THREE.PerspectiveCamera(fov, imgW / imgH, 0.05, 200);
   const p = lv.camera_position || { x: 0, y: 1.45, z: 5.6 };
   const t = lv.camera_look_at || { x: 0, y: 0.6, z: 0 };
   cam.position.set(p.x, p.y, p.z);
   cam.lookAt(t.x, t.y, t.z);
   cam.updateMatrixWorld(true);
 
-  const half = doorW / 2;
-  const worldCorners = [
-    new THREE.Vector3(-half, 0, 0),
-    new THREE.Vector3( half, 0, 0),
-    new THREE.Vector3( half, doorH, 0),
-    new THREE.Vector3(-half, doorH, 0),
-  ];
-
-  return worldCorners.map((v) => {
-    const projected = v.clone().project(cam);
-    // NDC (-1..+1) → pixel (origin top-left, y down)
-    const u = (projected.x + 1) / 2 * imgW;
-    const v2 = (1 - (projected.y + 1) / 2) * imgH;
-    return { x: u, y: v2 };
+  return worldPoints(cal).map(([x, y, z]) => {
+    const v = new THREE.Vector3(x, y, z).project(cam);
+    return {
+      x: (v.x + 1) / 2 * imgW,
+      y: (1 - (v.y + 1) / 2) * imgH,
+    };
   });
 }
 
@@ -53,38 +77,43 @@ export function createPoseCalibration({ onPoseApplied }) {
   const imgEl = $('pose-image');
   const svg = $('pose-svg');
   const closeBtn = $('pose-close');
+  const applyBtn = $('pose-apply');
   const resetBtn = $('pose-reset');
   const residualEl = $('pose-residual');
   const fovReadoutEl = $('pose-fov-readout');
   const imgSizeEl = $('pose-imgsize');
 
-  let pins = [];                  // [{ x, y }] in image-natural pixels
-  let pinEls = [];                // [{ g, ring, crossH, crossV, label }] — kept across drags
-  let polyEl = null;
-  let imageSize = { w: 0, h: 0 }; // natural size (pixels)
+  let pins = [];
+  let pinEls = [];
+  let edgeEls = [];
+  let imageSize = { w: 0, h: 0 };
   let currentCal = null;
-  let liveUrl = null;
 
-  // Full structural rebuild — called on open / reset / resize. NOT during drag
-  // (rebuilding would destroy the element that holds the pointer capture).
   function render() {
     if (!imageSize.w || !imageSize.h) return;
     svg.setAttribute('viewBox', `0 0 ${imageSize.w} ${imageSize.h}`);
     sizeSvgToImage();
-
     while (svg.firstChild) svg.removeChild(svg.firstChild);
     pinEls = [];
+    edgeEls = [];
 
-    polyEl = nsel('polygon', { class: 'pin-line', points: '' });
-    svg.appendChild(polyEl);
+    // Edges first (under the pins)
+    EDGES.forEach(([a, b]) => {
+      const grp = NODES[b].group === 'door' || NODES[a].group === 'door' ? 'door'
+                : (NODES[a].group === 'back' && NODES[b].group === 'back') ? 'back'
+                : 'near';
+      const line = nsel('line', { class: `pin-edge pin-edge--${grp}` });
+      svg.appendChild(line);
+      edgeEls.push({ line, a, b });
+    });
 
-    pins.forEach((p, idx) => {
-      const g = nsel('g', { class: 'pin', 'data-idx': idx });
-      const ring = nsel('circle', { class: 'pin-ring', r: 22 });
+    NODES.forEach((node, idx) => {
+      const g = nsel('g', { class: `pin pin--${node.group}`, 'data-idx': idx });
+      const ring = nsel('circle', { class: 'pin-ring', r: 18 });
       const crossH = nsel('line', { class: 'pin-cross' });
       const crossV = nsel('line', { class: 'pin-cross' });
       const label = nsel('text', { class: 'pin-label' });
-      label.textContent = PIN_LABELS[idx];
+      label.textContent = node.label;
       g.append(ring, crossH, crossV, label);
       g.addEventListener('pointerdown', onPinDown);
       svg.appendChild(g);
@@ -93,26 +122,24 @@ export function createPoseCalibration({ onPoseApplied }) {
     updatePinPositions();
   }
 
-  // Cheap per-frame position update — moves existing elements, no rebuild.
   function updatePinPositions() {
-    if (polyEl) polyEl.setAttribute('points', pins.map((p) => `${p.x},${p.y}`).join(' '));
+    edgeEls.forEach(({ line, a, b }) => {
+      line.setAttribute('x1', pins[a].x); line.setAttribute('y1', pins[a].y);
+      line.setAttribute('x2', pins[b].x); line.setAttribute('y2', pins[b].y);
+    });
     pins.forEach((p, idx) => {
       const e = pinEls[idx];
       if (!e) return;
-      e.ring.setAttribute('cx', p.x);
-      e.ring.setAttribute('cy', p.y);
-      e.crossH.setAttribute('x1', p.x - 7); e.crossH.setAttribute('y1', p.y);
-      e.crossH.setAttribute('x2', p.x + 7); e.crossH.setAttribute('y2', p.y);
-      e.crossV.setAttribute('x1', p.x); e.crossV.setAttribute('y1', p.y - 7);
-      e.crossV.setAttribute('x2', p.x); e.crossV.setAttribute('y2', p.y + 7);
-      e.label.setAttribute('x', p.x);
-      e.label.setAttribute('y', p.y - 28);
+      e.ring.setAttribute('cx', p.x); e.ring.setAttribute('cy', p.y);
+      e.crossH.setAttribute('x1', p.x - 6); e.crossH.setAttribute('y1', p.y);
+      e.crossH.setAttribute('x2', p.x + 6); e.crossH.setAttribute('y2', p.y);
+      e.crossV.setAttribute('x1', p.x); e.crossV.setAttribute('y1', p.y - 6);
+      e.crossV.setAttribute('x2', p.x); e.crossV.setAttribute('y2', p.y + 6);
+      e.label.setAttribute('x', p.x); e.label.setAttribute('y', p.y - 24);
     });
   }
 
   function sizeSvgToImage() {
-    // The image is letter-boxed via max-width/max-height. Read its current
-    // rendered size and absolutely position the SVG over it.
     const r = imgEl.getBoundingClientRect();
     const stageRect = stage.getBoundingClientRect();
     svg.style.width = `${r.width}px`;
@@ -128,9 +155,7 @@ export function createPoseCalibration({ onPoseApplied }) {
     const idx = parseInt(g.dataset.idx, 10);
     g.classList.add('dragging');
     g.setPointerCapture(ev.pointerId);
-    const startSvgPt = clientToImage(ev.clientX, ev.clientY);
-    const start = { ...pins[idx] };
-    drag = { idx, g, pointerId: ev.pointerId, startSvgPt, start };
+    drag = { idx, g, pointerId: ev.pointerId, startPt: clientToImage(ev.clientX, ev.clientY), start: { ...pins[idx] } };
     g.addEventListener('pointermove', onPinMove);
     g.addEventListener('pointerup', onPinUp);
     g.addEventListener('pointercancel', onPinUp);
@@ -138,15 +163,13 @@ export function createPoseCalibration({ onPoseApplied }) {
   function onPinMove(ev) {
     if (!drag) return;
     const pt = clientToImage(ev.clientX, ev.clientY);
-    const dx = pt.x - drag.startSvgPt.x;
-    const dy = pt.y - drag.startSvgPt.y;
     pins[drag.idx] = {
-      x: Math.max(0, Math.min(imageSize.w, drag.start.x + dx)),
-      y: Math.max(0, Math.min(imageSize.h, drag.start.y + dy)),
+      x: Math.max(0, Math.min(imageSize.w, drag.start.x + (pt.x - drag.startPt.x))),
+      y: Math.max(0, Math.min(imageSize.h, drag.start.y + (pt.y - drag.startPt.y))),
     };
-    updatePinPositions();   // in-place move, don't rebuild
+    updatePinPositions();
   }
-  function onPinUp(ev) {
+  function onPinUp() {
     if (!drag) return;
     const g = drag.g;
     g.releasePointerCapture(drag.pointerId);
@@ -155,81 +178,74 @@ export function createPoseCalibration({ onPoseApplied }) {
     g.removeEventListener('pointerup', onPinUp);
     g.removeEventListener('pointercancel', onPinUp);
     drag = null;
-    schedulePost();
+    // No auto-solve — user clicks Apply when all pins are placed.
   }
 
   function clientToImage(clientX, clientY) {
     const r = imgEl.getBoundingClientRect();
-    const x = (clientX - r.left) * (imageSize.w / r.width);
-    const y = (clientY - r.top) * (imageSize.h / r.height);
-    return { x, y };
+    return {
+      x: (clientX - r.left) * (imageSize.w / r.width),
+      y: (clientY - r.top) * (imageSize.h / r.height),
+    };
   }
 
-  // Debounced solve-pose POST
-  let postTimer = null;
-  function schedulePost() {
-    if (postTimer) clearTimeout(postTimer);
-    postTimer = setTimeout(submitPose, 120);
-  }
-
-  async function submitPose() {
-    if (pins.length !== 4) return;
+  async function apply() {
     const fov = currentCal?.live_view?.camera_fov_deg || 50;
+    applyBtn.disabled = true;
+    applyBtn.textContent = 'Solving…';
     try {
       const res = await fetch('/api/calibration/solve_pose', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
         body: JSON.stringify({
-          image_points: pins.map((p) => [p.x, p.y]),
+          room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
+          door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
           image_size: { width: imageSize.w, height: imageSize.h },
           fov_deg: fov,
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        residualEl.textContent = '— err';
+        residualEl.textContent = 'error';
         console.error('[pose] solve failed', body);
+        applyBtn.disabled = false;
+        applyBtn.textContent = 'Apply';
         return;
       }
       const data = await res.json();
       residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
-      // Reload current calibration so initial-projection logic picks up new pose
-      // if the user closes and re-opens. Also notify the rest of the app.
       if (onPoseApplied) onPoseApplied(data);
+      close();
     } catch (err) {
-      residualEl.textContent = '— err';
-      console.error('[pose] submit error', err);
+      residualEl.textContent = 'error';
+      console.error('[pose] apply error', err);
+    } finally {
+      applyBtn.disabled = false;
+      applyBtn.textContent = 'Apply';
     }
   }
 
   async function open(cal, url) {
     currentCal = cal;
-    liveUrl = url;
-    if (!url) {
-      console.error('[pose] no live image url available');
-      return;
-    }
+    if (!url) { console.error('[pose] no live image url'); return; }
     imgEl.src = url;
     await imageLoaded(imgEl);
     imageSize = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
     imgSizeEl.textContent = `${imageSize.w}×${imageSize.h}`;
     fovReadoutEl.textContent = `${(cal?.live_view?.camera_fov_deg || 50).toFixed(0)}°`;
-    pins = projectCornersToImage(cal, imageSize.w, imageSize.h);
+    pins = projectAll(cal, imageSize.w, imageSize.h);
     residualEl.textContent = '—';
     overlay.classList.remove('hidden');
     requestAnimationFrame(render);
   }
 
-  function close() {
-    overlay.classList.add('hidden');
-  }
+  function close() { overlay.classList.add('hidden'); }
 
   function reset() {
     if (!currentCal) return;
-    pins = projectCornersToImage(currentCal, imageSize.w, imageSize.h);
-    render();
-    schedulePost();
+    pins = projectAll(currentCal, imageSize.w, imageSize.h);
+    updatePinPositions();
   }
 
   function imageLoaded(img) {
@@ -240,7 +256,8 @@ export function createPoseCalibration({ onPoseApplied }) {
     });
   }
 
-  closeBtn.addEventListener('click', close);
+  closeBtn.addEventListener('click', close);   // X = cancel
+  applyBtn.addEventListener('click', apply);   // Apply = solve + close
   resetBtn.addEventListener('click', reset);
   window.addEventListener('resize', () => {
     if (!overlay.classList.contains('hidden')) render();
