@@ -627,6 +627,10 @@ export function createScene(container) {
       if (lv.camera_position) {
         liveCamera.position.set(lv.camera_position.x, lv.camera_position.y, lv.camera_position.z);
       }
+      // Set up BEFORE lookAt so the solved roll is honoured (OpenCV→Three.js).
+      if (lv.camera_up) {
+        liveCamera.up.set(lv.camera_up.x, lv.camera_up.y, lv.camera_up.z);
+      }
       if (lv.camera_look_at) {
         liveCamera.lookAt(lv.camera_look_at.x, lv.camera_look_at.y, lv.camera_look_at.z);
       }

@@ -234,6 +234,7 @@ async function cycleSource() {
 els.sourcePill.addEventListener('click', cycleSource);
 
 let currentActiveVehicle = null;
+let currentCameraFov = null;
 
 // Drop any stale quality-cycler preferences from when the temporary pill existed.
 try { localStorage.removeItem('pilot-view.vehicle-quality'); } catch {}
@@ -403,7 +404,9 @@ function ensureScene() {
 document.addEventListener('click', (ev) => {
   if (ev.target.id !== 'pose-pin-open') return;
   if (!pose) ensureScene();
-  if (pose && currentCalibration) pose.open(currentCalibration, currentLiveUrl);
+  // Pass the real camera FOV if the active source reports it (orbbec); the
+  // synthetic source doesn't, so the solver computes FOV instead.
+  if (pose && currentCalibration) pose.open(currentCalibration, currentLiveUrl, currentCameraFov);
 });
 
 function showDisconnected() {
@@ -620,6 +623,7 @@ function applyState(payload) {
 
   // Camera pill
   setPill(els.cameraPill, !!c.connected, 'Camera');
+  currentCameraFov = c.fov_deg || null;
 
   // Door + Lights pills
   applyDoorState(payload.door);

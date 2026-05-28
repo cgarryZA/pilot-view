@@ -3,36 +3,22 @@ import * as THREE from 'https://esm.sh/three@0.169.0';
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Node order MUST match the backend's ROOM_ORDER + DOOR_ORDER.
-//   room (8): near_tl,tr,br,bl  then  back_tl,tr,br,bl
-//   door (4): door_tl,tr,br,bl
-// All 12 nodes are draggable. The near corners (placed along the wall seams)
-// are what capture an off-centre / off-axis camera in the solve.
+// 12 nodes: 4 back-wall corners (blue, exact), 4 near direction nodes (white,
+// direction-only), 4 door corners (yellow, exact). back[i] pairs with near[i].
 const NODES = [
-  { key: 'near_tl', label: 'TL', group: 'near', draggable: true },
-  { key: 'near_tr', label: 'TR', group: 'near', draggable: true },
-  { key: 'near_br', label: 'BR', group: 'near', draggable: true },
-  { key: 'near_bl', label: 'BL', group: 'near', draggable: true },
-  { key: 'back_tl', label: 'TL', group: 'back', draggable: true },
-  { key: 'back_tr', label: 'TR', group: 'back', draggable: true },
-  { key: 'back_br', label: 'BR', group: 'back', draggable: true },
-  { key: 'back_bl', label: 'BL', group: 'back', draggable: true },
-  { key: 'door_tl', label: 'TL', group: 'door', draggable: true },
-  { key: 'door_tr', label: 'TR', group: 'door', draggable: true },
-  { key: 'door_br', label: 'BR', group: 'door', draggable: true },
-  { key: 'door_bl', label: 'BL', group: 'door', draggable: true },
+  { label: 'TL', group: 'back' }, { label: 'TR', group: 'back' },
+  { label: 'BR', group: 'back' }, { label: 'BL', group: 'back' },
+  { label: 'TL', group: 'near' }, { label: 'TR', group: 'near' },
+  { label: 'BR', group: 'near' }, { label: 'BL', group: 'near' },
+  { label: 'TL', group: 'door' }, { label: 'TR', group: 'door' },
+  { label: 'BR', group: 'door' }, { label: 'BL', group: 'door' },
 ];
 
-// Edges to draw (indices into NODES) — the garage cuboid + door rectangle.
+// [a, b, group] — edges drawn between node indices.
 const EDGES = [
-  // near rectangle
-  [0, 1], [1, 2], [2, 3], [3, 0],
-  // back rectangle
-  [4, 5], [5, 6], [6, 7], [7, 4],
-  // connecting seams (near→back)
-  [0, 4], [1, 5], [2, 6], [3, 7],
-  // door rectangle
-  [8, 9], [9, 10], [10, 11], [11, 8],
+  [0, 1, 'back'], [1, 2, 'back'], [2, 3, 'back'], [3, 0, 'back'],   // back rectangle
+  [0, 4, 'near'], [1, 5, 'near'], [2, 6, 'near'], [3, 7, 'near'],   // receding seams
+  [8, 9, 'door'], [9, 10, 'door'], [10, 11, 'door'], [11, 8, 'door'], // door rectangle
 ];
 
 function nsel(name, attrs = {}) {
@@ -48,38 +34,23 @@ function worldPoints(cal) {
   const cx = g.door_center_x || 0.0;
   const hw = W / 2, hdw = dw / 2;
   return [
-    [-hw, H, L], [hw, H, L], [hw, 0, L], [-hw, 0, L],   // near (z=L)
-    [-hw, H, 0], [hw, H, 0], [hw, 0, 0], [-hw, 0, 0],   // back (z=0)
-    [cx - hdw, dh, 0], [cx + hdw, dh, 0], [cx + hdw, 0, 0], [cx - hdw, 0, 0],  // door (z=0)
+    [-hw, H, 0], [hw, H, 0], [hw, 0, 0], [-hw, 0, 0],          // back z=0
+    [-hw, H, L], [hw, H, L], [hw, 0, L], [-hw, 0, L],          // near z=L
+    [cx - hdw, dh, 0], [cx + hdw, dh, 0], [cx + hdw, 0, 0], [cx - hdw, 0, 0], // door
   ];
 }
 
-function projectWith(camPos, lookAt, fov, worldPts, imgW, imgH) {
+function projectWith(pose, fov, worldPts, imgW, imgH) {
   const cam = new THREE.PerspectiveCamera(fov, imgW / imgH, 0.05, 200);
-  cam.position.set(camPos.x, camPos.y, camPos.z);
-  cam.lookAt(lookAt.x, lookAt.y, lookAt.z);
+  const up = pose.camera_up || { x: 0, y: 1, z: 0 };
+  cam.up.set(up.x, up.y, up.z);
+  cam.position.set(pose.camera_position.x, pose.camera_position.y, pose.camera_position.z);
+  cam.lookAt(pose.camera_look_at.x, pose.camera_look_at.y, pose.camera_look_at.z);
   cam.updateMatrixWorld(true);
   return worldPts.map(([x, y, z]) => {
     const v = new THREE.Vector3(x, y, z).project(cam);
     return { x: (v.x + 1) / 2 * imgW, y: (1 - (v.y + 1) / 2) * imgH };
   });
-}
-
-function projectAll(cal, imgW, imgH) {
-  const lv = cal?.live_view || {};
-  const pts = projectWith(
-    lv.camera_position || { x: 0, y: 1.45, z: 5.6 },
-    lv.camera_look_at || { x: 0, y: 0.6, z: 0 },
-    lv.camera_fov_deg || 50,
-    worldPoints(cal), imgW, imgH,
-  );
-  // Clamp to a grabbable on-screen band — a bad initial pose (or near corners
-  // that project beyond the frame) would otherwise put pins out of reach.
-  const m = 24;
-  return pts.map((p) => ({
-    x: Math.max(m, Math.min(imgW - m, p.x)),
-    y: Math.max(m, Math.min(imgH - m, p.y)),
-  }));
 }
 
 export function createPoseCalibration({ onPoseApplied }) {
@@ -92,44 +63,45 @@ export function createPoseCalibration({ onPoseApplied }) {
   const resetBtn = $('pose-reset');
   const residualEl = $('pose-residual');
   const fovReadoutEl = $('pose-fov-readout');
-  const fovSlider = $('pose-fov-slider');
   const imgSizeEl = $('pose-imgsize');
 
   let pins = [];
   let pinEls = [];
   let edgeEls = [];
+  let solvedEdgeEls = [];
   let imageSize = { w: 0, h: 0 };
   let currentCal = null;
-  let currentFov = 50;
+  let knownFov = null;   // set when the real camera reports its intrinsics
 
   function render() {
     if (!imageSize.w || !imageSize.h) return;
     svg.setAttribute('viewBox', `0 0 ${imageSize.w} ${imageSize.h}`);
     sizeSvgToImage();
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    pinEls = [];
-    edgeEls = [];
+    pinEls = []; edgeEls = []; solvedEdgeEls = [];
 
-    // Edges first (under the pins)
-    EDGES.forEach(([a, b]) => {
-      const grp = NODES[b].group === 'door' || NODES[a].group === 'door' ? 'door'
-                : (NODES[a].group === 'back' && NODES[b].group === 'back') ? 'back'
-                : 'near';
+    // Faint "solved" box (drawn first, under everything)
+    EDGES.forEach(() => {
+      const line = nsel('line', { class: 'pin-edge pin-edge--solved' });
+      svg.appendChild(line);
+      solvedEdgeEls.push(line);
+    });
+    // User-pin edges
+    EDGES.forEach(([, , grp]) => {
       const line = nsel('line', { class: `pin-edge pin-edge--${grp}` });
       svg.appendChild(line);
-      edgeEls.push({ line, a, b });
+      edgeEls.push(line);
     });
-
+    // Pins
     NODES.forEach((node, idx) => {
-      const cls = `pin pin--${node.group}${node.draggable ? '' : ' pin--guide'}`;
-      const g = nsel('g', { class: cls, 'data-idx': idx });
-      const ring = nsel('circle', { class: 'pin-ring', r: node.draggable ? 18 : 12 });
+      const g = nsel('g', { class: `pin pin--${node.group}`, 'data-idx': idx });
+      const ring = nsel('circle', { class: 'pin-ring', r: 16 });
       const crossH = nsel('line', { class: 'pin-cross' });
       const crossV = nsel('line', { class: 'pin-cross' });
       const label = nsel('text', { class: 'pin-label' });
       label.textContent = node.label;
       g.append(ring, crossH, crossV, label);
-      if (node.draggable) g.addEventListener('pointerdown', onPinDown);
+      g.addEventListener('pointerdown', onPinDown);
       svg.appendChild(g);
       pinEls.push({ g, ring, crossH, crossV, label });
     });
@@ -137,9 +109,10 @@ export function createPoseCalibration({ onPoseApplied }) {
   }
 
   function updatePinPositions() {
-    edgeEls.forEach(({ line, a, b }) => {
-      line.setAttribute('x1', pins[a].x); line.setAttribute('y1', pins[a].y);
-      line.setAttribute('x2', pins[b].x); line.setAttribute('y2', pins[b].y);
+    EDGES.forEach(([a, b], i) => {
+      const e = edgeEls[i];
+      e.setAttribute('x1', pins[a].x); e.setAttribute('y1', pins[a].y);
+      e.setAttribute('x2', pins[b].x); e.setAttribute('y2', pins[b].y);
     });
     pins.forEach((p, idx) => {
       const e = pinEls[idx];
@@ -149,7 +122,16 @@ export function createPoseCalibration({ onPoseApplied }) {
       e.crossH.setAttribute('x2', p.x + 6); e.crossH.setAttribute('y2', p.y);
       e.crossV.setAttribute('x1', p.x); e.crossV.setAttribute('y1', p.y - 6);
       e.crossV.setAttribute('x2', p.x); e.crossV.setAttribute('y2', p.y + 6);
-      e.label.setAttribute('x', p.x); e.label.setAttribute('y', p.y - 24);
+      e.label.setAttribute('x', p.x); e.label.setAttribute('y', p.y - 22);
+    });
+  }
+
+  function drawSolved(pose) {
+    const proj = projectWith(pose, pose.camera_fov_deg, worldPoints(currentCal), imageSize.w, imageSize.h);
+    EDGES.forEach(([a, b], i) => {
+      const e = solvedEdgeEls[i];
+      e.setAttribute('x1', proj[a].x); e.setAttribute('y1', proj[a].y);
+      e.setAttribute('x2', proj[b].x); e.setAttribute('y2', proj[b].y);
     });
   }
 
@@ -192,51 +174,7 @@ export function createPoseCalibration({ onPoseApplied }) {
     g.removeEventListener('pointerup', onPinUp);
     g.removeEventListener('pointercancel', onPinUp);
     drag = null;
-    // Preview the residual (doesn't move pins or save) so you get instant
-    // feedback on fit quality without your placement being overwritten.
-    previewResidual();
-  }
-
-  let previewTimer = null;
-  function previewResidual() {
-    if (previewTimer) clearTimeout(previewTimer);
-    previewTimer = setTimeout(async () => {
-      try {
-        const res = await fetch('/api/calibration/solve_pose', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          body: JSON.stringify({
-            room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
-            door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
-            image_size: { width: imageSize.w, height: imageSize.h },
-            fov_deg: currentFov,
-            apply: false,
-          }),
-        });
-        if (!res.ok) { residualEl.textContent = 'error'; return; }
-        const data = await res.json();
-        residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
-      } catch {
-        residualEl.textContent = 'error';
-      }
-    }, 100);
-  }
-
-  function setFov(v, { persist = false } = {}) {
-    currentFov = v;
-    fovReadoutEl.textContent = `${v}°`;
-    if (fovSlider.value !== String(v)) fovSlider.value = String(v);
-    previewResidual();
-    if (persist) {
-      fetch('/api/calibration', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ live_view: { camera_fov_deg: v } }),
-      }).catch((err) => console.error('[pose] fov persist failed', err));
-      if (currentCal?.live_view) currentCal.live_view.camera_fov_deg = v;
-    }
+    preview();
   }
 
   function clientToImage(clientX, clientY) {
@@ -247,6 +185,39 @@ export function createPoseCalibration({ onPoseApplied }) {
     };
   }
 
+  function solveBody(apply) {
+    return {
+      back_points: pins.slice(0, 4).map((p) => [p.x, p.y]),
+      near_points: pins.slice(4, 8).map((p) => [p.x, p.y]),
+      door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
+      image_size: { width: imageSize.w, height: imageSize.h },
+      known_fov_deg: knownFov || undefined,
+      apply,
+    };
+  }
+
+  let previewTimer = null;
+  function preview() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/calibration/solve_pose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify(solveBody(false)),
+        });
+        if (!res.ok) { residualEl.textContent = 'error'; return; }
+        const data = await res.json();
+        residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
+        fovReadoutEl.textContent = `${data.camera_fov_deg.toFixed(0)}°${data.fov_solved ? ' (solved)' : ' (camera)'}`;
+        drawSolved(data);
+      } catch {
+        residualEl.textContent = 'error';
+      }
+    }, 100);
+  }
+
   async function apply() {
     applyBtn.disabled = true;
     applyBtn.textContent = 'Solving…';
@@ -255,27 +226,18 @@ export function createPoseCalibration({ onPoseApplied }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({
-          room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
-          door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
-          image_size: { width: imageSize.w, height: imageSize.h },
-          fov_deg: currentFov,
-        }),
+        body: JSON.stringify(solveBody(true)),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         residualEl.textContent = 'error';
         console.error('[pose] solve failed', body);
-        applyBtn.disabled = false;
-        applyBtn.textContent = 'Apply';
         return;
       }
       const data = await res.json();
-      residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
       if (onPoseApplied) onPoseApplied(data);
       close();
     } catch (err) {
-      residualEl.textContent = 'error';
       console.error('[pose] apply error', err);
     } finally {
       applyBtn.disabled = false;
@@ -283,29 +245,38 @@ export function createPoseCalibration({ onPoseApplied }) {
     }
   }
 
-  async function open(cal, url) {
+  async function open(cal, url, cameraFov = null) {
     currentCal = cal;
+    knownFov = cameraFov && cameraFov > 0 ? cameraFov : null;
     if (!url) { console.error('[pose] no live image url'); return; }
     imgEl.src = url;
     await imageLoaded(imgEl);
     imageSize = { w: imgEl.naturalWidth, h: imgEl.naturalHeight };
     imgSizeEl.textContent = `${imageSize.w}×${imageSize.h}`;
-    currentFov = Math.round(cal?.live_view?.camera_fov_deg || 50);
-    fovSlider.value = String(currentFov);
-    fovReadoutEl.textContent = `${currentFov}°`;
-    pins = projectAll(cal, imageSize.w, imageSize.h);
+    fovReadoutEl.textContent = knownFov ? `${knownFov.toFixed(0)}° (camera)` : '—';
+    pins = initialPins(cal);
     residualEl.textContent = '—';
     overlay.classList.remove('hidden');
     requestAnimationFrame(render);
   }
 
-  function close() { overlay.classList.add('hidden'); }
-
-  function reset() {
-    if (!currentCal) return;
-    pins = projectAll(currentCal, imageSize.w, imageSize.h);
-    updatePinPositions();
+  function initialPins(cal) {
+    const lv = cal?.live_view || {};
+    const pose = {
+      camera_position: lv.camera_position || { x: 0, y: 1.45, z: 5.6 },
+      camera_look_at: lv.camera_look_at || { x: 0, y: 0.6, z: 0 },
+      camera_up: lv.camera_up || { x: 0, y: 1, z: 0 },
+    };
+    const proj = projectWith(pose, lv.camera_fov_deg || 50, worldPoints(cal), imageSize.w, imageSize.h);
+    const m = 24;
+    return proj.map((p) => ({
+      x: Math.max(m, Math.min(imageSize.w - m, p.x)),
+      y: Math.max(m, Math.min(imageSize.h - m, p.y)),
+    }));
   }
+
+  function close() { overlay.classList.add('hidden'); }
+  function reset() { if (currentCal) { pins = initialPins(currentCal); updatePinPositions(); } }
 
   function imageLoaded(img) {
     return new Promise((resolve) => {
@@ -315,15 +286,10 @@ export function createPoseCalibration({ onPoseApplied }) {
     });
   }
 
-  closeBtn.addEventListener('click', close);   // X = cancel
-  applyBtn.addEventListener('click', apply);   // Apply = solve + close
+  closeBtn.addEventListener('click', close);
+  applyBtn.addEventListener('click', apply);
   resetBtn.addEventListener('click', reset);
-  // FOV: live residual update while dragging, persist on release.
-  fovSlider.addEventListener('input', () => setFov(parseInt(fovSlider.value, 10)));
-  fovSlider.addEventListener('change', () => setFov(parseInt(fovSlider.value, 10), { persist: true }));
-  window.addEventListener('resize', () => {
-    if (!overlay.classList.contains('hidden')) render();
-  });
+  window.addEventListener('resize', () => { if (!overlay.classList.contains('hidden')) render(); });
 
   return { open, close };
 }

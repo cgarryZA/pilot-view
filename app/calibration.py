@@ -70,6 +70,7 @@ DEFAULTS: dict[str, Any] = {
     "live_view": {
         "camera_position": {"x": 0.0, "y": 1.45, "z": 5.6},
         "camera_look_at": {"x": 0.0, "y": 0.6, "z": 0.0},
+        "camera_up": {"x": 0.0, "y": 1.0, "z": 0.0},
         "camera_fov_deg": 50.0,
     },
     "thresholds": {"warn": 0.50, "danger": 0.20},

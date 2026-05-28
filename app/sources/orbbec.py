@@ -10,6 +10,7 @@ Robust to hot-plug: if the pipeline errors (cable yanked, USB hiccup) the loop
 catches it, clears the latest frame, and retries every few seconds.
 """
 
+import math
 import threading
 import time
 from datetime import datetime, timezone
@@ -43,6 +44,7 @@ class OrbbecSource(CameraSource):
         self._last_error: Optional[str] = None
         self._latest_jpeg: Optional[bytes] = None
         self._last_frame_monotonic: float = 0.0
+        self._fov_deg: Optional[float] = None   # vertical FOV from camera intrinsics
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -79,6 +81,7 @@ class OrbbecSource(CameraSource):
                 config = sdk.Config()
                 color_profile = self._pick_color_profile(pipeline)
                 config.enable_stream(color_profile)
+                self._read_intrinsics(color_profile)
                 pipeline.start(config)
 
                 with self._lock:
@@ -129,6 +132,20 @@ class OrbbecSource(CameraSource):
         except Exception as exc:
             with self._lock:
                 self._last_error = f"device info read failed: {exc}"
+
+    def _read_intrinsics(self, color_profile) -> None:
+        """Pull the camera's real vertical FOV from the colour stream intrinsics,
+        so pose calibration can skip solving for FOV and use the true value."""
+        try:
+            intr = color_profile.get_intrinsic()
+            fy = float(intr.fy)
+            h = float(intr.height)
+            if fy > 0 and h > 0:
+                fov = math.degrees(2.0 * math.atan((h / 2.0) / fy))
+                with self._lock:
+                    self._fov_deg = round(fov, 2)
+        except Exception as exc:
+            print(f"[orbbec] could not read intrinsics: {exc}")
 
     def _pick_color_profile(self, pipeline):
         sdk = self._sdk
@@ -197,6 +214,7 @@ class OrbbecSource(CameraSource):
             info = self._device_info
             error = self._last_error
             last_attempt = self._last_attempt
+            fov_deg = self._fov_deg
 
         geometry = None
         live_url = None
@@ -232,6 +250,7 @@ class OrbbecSource(CameraSource):
                 "interface": "USB",
                 "serial": info["serial"] if info else None,
                 "firmware": info["firmware"] if info else None,
+                "fov_deg": fov_deg,   # real vertical FOV from intrinsics (None if unknown)
                 "last_attempt": last_attempt,
                 "error": None if streaming else (error or "waiting for frames"),
             },

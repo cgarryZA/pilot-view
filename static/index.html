@@ -455,10 +455,9 @@
         <div>
           <div class="pose-title">POSE CALIBRATION</div>
           <div class="pose-sub">
-            Drag every node so the wireframe box matches the room:
-            <span class="pose-key pose-key--near">NEAR</span> corners along the near wall seams,
-            <span class="pose-key pose-key--back">BACK</span> corners on the far wall,
-            <span class="pose-key pose-key--door">DOOR</span> on the entrance opening. Then click Apply.
+            <span class="pose-key pose-key--back">BLUE</span> = exact back-wall corners ·
+            <span class="pose-key pose-key--door">YELLOW</span> = exact door-opening corners ·
+            <span class="pose-key pose-key--near">WHITE</span> = drag along each wall seam to set its direction (the green box is the solved fit; FOV is computed). Then Apply.
           </div>
         </div>
         <button class="calib-close" id="pose-close" aria-label="Cancel">×</button>
@@ -469,11 +468,7 @@
       </div>
       <div class="pose-bar pose-bar--bottom">
         <div class="pose-stat"><span class="pose-stat-label">Residual</span><span class="pose-stat-value" id="pose-residual">—</span></div>
-        <div class="pose-stat pose-fov">
-          <span class="pose-stat-label">FOV</span>
-          <input type="range" id="pose-fov-slider" min="20" max="120" step="1" />
-          <span class="pose-stat-value" id="pose-fov-readout">—</span>
-        </div>
+        <div class="pose-stat"><span class="pose-stat-label">FOV</span><span class="pose-stat-value" id="pose-fov-readout">—</span></div>
         <div class="pose-stat"><span class="pose-stat-label">Image</span><span class="pose-stat-value" id="pose-imgsize">—</span></div>
         <button class="calib-btn calib-btn--ghost" id="pose-reset" type="button">Reset pins</button>
         <button class="calib-btn" id="pose-apply" type="button">Apply</button>

@@ -84,32 +84,36 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
     if not isinstance(payload, dict):
         raise HTTPException(400, "expected JSON object")
     try:
-        room = payload["room_points"]
+        back = payload["back_points"]
+        near = payload["near_points"]
         door = payload.get("door_points") or []
         size = payload["image_size"]
-        fov = float(payload.get("fov_deg") or 50.0)
+        known_fov = payload.get("known_fov_deg")  # supplied for real-camera intrinsics
         apply = bool(payload.get("apply", True))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, f"invalid payload: {exc}")
 
-    if not isinstance(room, list) or len(room) != 8 or any(len(p) != 2 for p in room):
-        raise HTTPException(400, "room_points must be a list of 8 [u, v] pairs")
+    for name, arr in (("back_points", back), ("near_points", near)):
+        if not isinstance(arr, list) or len(arr) != 4 or any(len(p) != 2 for p in arr):
+            raise HTTPException(400, f"{name} must be a list of 4 [u, v] pairs")
 
     cal = calibration.load()
     garage = cal.get("garage", {})
     image_size = (int(size["width"]), int(size["height"]))
-    room_pts = [(float(u), float(v)) for u, v in room]
+    back_pts = [(float(u), float(v)) for u, v in back]
+    near_pts = [(float(u), float(v)) for u, v in near]
     door_pts = [(float(u), float(v)) for u, v in door] if len(door) == 4 else []
 
     try:
         result = pose_solver.solve_full(
-            room_image_points=room_pts,
+            back_image_points=back_pts,
+            near_image_points=near_pts,
             door_image_points=door_pts,
             image_size_px=image_size,
-            fov_deg=fov,
             garage_w=float(garage.get("width", 3.0)),
             garage_l=float(garage.get("length", 5.8)),
             garage_h=float(garage.get("height", 2.3)),
+            known_fov_deg=float(known_fov) if known_fov else None,
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -118,7 +122,8 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
         "live_view": {
             "camera_position": result["camera_position"],
             "camera_look_at":  result["camera_look_at"],
-            "camera_fov_deg":  fov,
+            "camera_up":       result["camera_up"],
+            "camera_fov_deg":  result["camera_fov_deg"],
         },
     }
     # Apply derived door dimensions if back-projection succeeded.

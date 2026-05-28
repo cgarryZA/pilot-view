@@ -1,19 +1,25 @@
-"""Camera-pose solver + door back-projection.
+"""Camera-pose + FOV solver from a known cuboid and its receding edges.
 
-The calibration UI places 12 pins on the live image:
+Node system (matches the UI):
+  * BLUE  — the 4 exact corners of the back/door wall (a known W×H rectangle on z=0).
+  * WHITE — direction-only nodes. The line BLUE→WHITE is the image direction of the
+            receding edge (the wall↔floor / wall↔ceiling seam). The true near
+            corner is off-screen at  blue_world + (0,0,length); only the WHITE
+            node's *direction* from its blue corner is meaningful.
+  * YELLOW — the 4 exact corners of the garage-door opening (used for door dims).
 
-  * 8 garage-box corners — 4 on the near wall (z=length, where the camera is,
-    appearing at the image edges) and 4 on the far/door wall (z=0, appearing
-    nested inside). These have known 3D positions from garage W/L/H, so they
-    drive the camera-pose solve (SQPNP, which handles the non-coplanar set).
+How FOV is found: the four receding edges are all parallel (+Z) and the room is
+rectangular (90° corners). For a candidate FOV we solve the camera pose from the
+back-wall rectangle (IPPE — a planar target), project the near corners (z=length),
+and measure how well each projected receding edge's *direction* matches the user's
+BLUE→WHITE direction. The FOV that minimises that angular error is the answer.
+This is why FOV is computed, not slid.
 
-  * 4 door-opening corners on the far wall (z=0). The door's real size is
-    unknown, so these are NOT used in the pose solve. Instead, once we have the
-    pose, we back-project each door pin as a camera ray and intersect it with
-    the z=0 plane to recover the door's true width/height/centre.
+If the caller supplies a known FOV (e.g. read from the real Gemini 2's
+intrinsics), we skip the search and just solve the pose at that FOV.
 
-World frame: +X right, +Y up, +Z from the door wall (z=0) toward the
-camera-end wall (z=length).
+Returns a Three.js-ready (position, look_at, up). up is derived from the solved
+rotation so the OpenCV(+Y-down) → Three.js(+Y-up) conversion is exact.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -21,26 +27,29 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 import cv2
 
-# Canonical pin order — the frontend must send points in these orders.
-ROOM_ORDER = [
-    "near_tl", "near_tr", "near_br", "near_bl",   # z = length (outer/edges)
-    "back_tl", "back_tr", "back_br", "back_bl",   # z = 0 (inner/door wall)
-]
-DOOR_ORDER = ["door_tl", "door_tr", "door_br", "door_bl"]   # z = 0
+# Pin order for back + near (paired): top-left, top-right, bottom-right, bottom-left.
+CORNER_ORDER = ["tl", "tr", "br", "bl"]
+DOOR_ORDER = ["door_tl", "door_tr", "door_br", "door_bl"]
 
 
-def room_corners_world(width: float, length: float, height: float) -> Dict[str, Tuple[float, float, float]]:
+def back_wall_world(width: float, height: float) -> np.ndarray:
     w = width / 2.0
-    return {
-        "near_tl": (-w, height, length),
-        "near_tr": ( w, height, length),
-        "near_br": ( w, 0.0,    length),
-        "near_bl": (-w, 0.0,    length),
-        "back_tl": (-w, height, 0.0),
-        "back_tr": ( w, height, 0.0),
-        "back_br": ( w, 0.0,    0.0),
-        "back_bl": (-w, 0.0,    0.0),
-    }
+    return np.array([
+        [-w, height, 0.0],  # tl
+        [ w, height, 0.0],  # tr
+        [ w, 0.0,    0.0],  # br
+        [-w, 0.0,    0.0],  # bl
+    ], dtype=np.float64)
+
+
+def near_wall_world(width: float, height: float, length: float) -> np.ndarray:
+    w = width / 2.0
+    return np.array([
+        [-w, height, length],
+        [ w, height, length],
+        [ w, 0.0,    length],
+        [-w, 0.0,    length],
+    ], dtype=np.float64)
 
 
 def door_corners_world(door_w: float, door_h: float, center_x: float = 0.0) -> Dict[str, Tuple[float, float, float]]:
@@ -61,93 +70,142 @@ def intrinsics(image_size_px: Tuple[int, int], fov_deg: float) -> np.ndarray:
     return np.array([[fx, 0, w / 2.0], [0, fy, h / 2.0], [0, 0, 1.0]], dtype=np.float64)
 
 
-def _pose_to_threejs(rvec: np.ndarray, tvec: np.ndarray) -> Tuple[dict, dict]:
+def _ippe_back_wall(back_img: np.ndarray, back_world: np.ndarray, K: np.ndarray):
+    """Pose from the back-wall rectangle; pick the physically valid mirror solution."""
+    n, rvecs, tvecs, reproj = cv2.solvePnPGeneric(
+        back_world, back_img, K, np.zeros(4), flags=cv2.SOLVEPNP_IPPE
+    )
+    if n < 1:
+        return None
+    best = None
+    for i in range(n):
+        R, _ = cv2.Rodrigues(rvecs[i])
+        cam = (-R.T @ tvecs[i]).flatten()
+        err = float(reproj[i]) if reproj is not None else 0.0
+        score = (1000.0 if cam[1] > 0 else 0.0) - err   # prefer camera above floor
+        if best is None or score > best[0]:
+            best = (score, rvecs[i], tvecs[i])
+    return best[1], best[2]
+
+
+def _edge_direction_error(K, rvec, tvec, back_world, near_world, drawn_dir) -> float:
+    bp, _ = cv2.projectPoints(back_world, rvec, tvec, K, np.zeros(4))
+    npj, _ = cv2.projectPoints(near_world, rvec, tvec, K, np.zeros(4))
+    bp = bp.reshape(-1, 2)
+    npj = npj.reshape(-1, 2)
+    total = 0.0
+    for i in range(4):
+        d = npj[i] - bp[i]
+        nn = np.linalg.norm(d)
+        if nn < 1e-6:
+            total += 1.0
+            continue
+        d /= nn
+        total += 1.0 - float(np.dot(d, drawn_dir[i]))   # 0 = perfect, 2 = opposite
+    return total
+
+
+def _pose_to_threejs(rvec, tvec):
     R, _ = cv2.Rodrigues(rvec)
     cam_pos = (-R.T @ tvec).flatten()
-    forward_world = (R.T @ np.array([0.0, 0.0, 1.0])).flatten()
-    look_at = cam_pos + forward_world
-    return (
-        {"x": float(cam_pos[0]), "y": float(cam_pos[1]), "z": float(cam_pos[2])},
-        {"x": float(look_at[0]), "y": float(look_at[1]), "z": float(look_at[2])},
-    )
+    forward = (R.T @ np.array([0.0, 0.0, 1.0])).flatten()
+    up = (-R.T @ np.array([0.0, 1.0, 0.0])).flatten()
+    look_at = cam_pos + forward
+    d = lambda v: {"x": float(v[0]), "y": float(v[1]), "z": float(v[2])}
+    return d(cam_pos), d(look_at), d(up)
 
 
-def _backproject_to_z0(image_points: List[Tuple[float, float]], K: np.ndarray,
-                       rvec: np.ndarray, tvec: np.ndarray) -> List[Optional[np.ndarray]]:
+def _backproject_to_z0(image_points, K, rvec, tvec):
     R, _ = cv2.Rodrigues(rvec)
     cam_pos = (-R.T @ tvec).flatten()
     K_inv = np.linalg.inv(K)
-    out: List[Optional[np.ndarray]] = []
+    out = []
     for (u, v) in image_points:
-        ray_world = R.T @ (K_inv @ np.array([u, v, 1.0]))
-        if abs(ray_world[2]) < 1e-9:
-            out.append(None)
-            continue
-        s = -cam_pos[2] / ray_world[2]
-        if s <= 0:  # plane is behind the camera for this ray
-            out.append(None)
-            continue
-        out.append(cam_pos + s * ray_world)
+        ray = R.T @ (K_inv @ np.array([u, v, 1.0]))
+        if abs(ray[2]) < 1e-9:
+            out.append(None); continue
+        s = -cam_pos[2] / ray[2]
+        out.append(cam_pos + s * ray if s > 0 else None)
     return out
 
 
 def solve_full(
-    room_image_points: List[Tuple[float, float]],
+    back_image_points: List[Tuple[float, float]],
+    near_image_points: List[Tuple[float, float]],
     door_image_points: List[Tuple[float, float]],
     image_size_px: Tuple[int, int],
-    fov_deg: float,
     garage_w: float,
     garage_l: float,
     garage_h: float,
+    known_fov_deg: Optional[float] = None,
 ) -> dict:
-    """Solve camera pose from all 8 room corners (4 near z=L, 4 back z=0). The
-    user places every corner — including the near ones along the wall/floor/
-    ceiling seams — which is what captures an off-centre / off-axis camera. The
-    set is non-coplanar, so SQPNP returns a single unambiguous pose (no flip).
+    if len(back_image_points) != 4 or len(near_image_points) != 4:
+        raise ValueError("need 4 back points and 4 near direction points")
 
-    Door dimensions are derived from the 4 door corners via back-projection.
-    """
-    if len(room_image_points) != 8:
-        raise ValueError("need 8 room image points (near 0-3, back 4-7)")
-    if fov_deg <= 0 or fov_deg >= 180:
-        raise ValueError("fov_deg out of range")
+    back_world = back_wall_world(garage_w, garage_h)
+    near_world = near_wall_world(garage_w, garage_h, garage_l)
+    back_img = np.array(back_image_points, dtype=np.float64)
+    near_img = np.array(near_image_points, dtype=np.float64)
 
-    K = intrinsics(image_size_px, fov_deg)
-    world_map = room_corners_world(garage_w, garage_l, garage_h)
-    obj = np.array([world_map[k] for k in ROOM_ORDER], dtype=np.float64)
-    img = np.array(room_image_points, dtype=np.float64)
-    dist = np.zeros(4, dtype=np.float64)
+    drawn = near_img - back_img
+    norms = np.linalg.norm(drawn, axis=1, keepdims=True)
+    norms[norms < 1e-6] = 1.0
+    drawn_dir = drawn / norms
 
-    ok, rvec, tvec = cv2.solvePnP(obj, img, K, dist, flags=cv2.SOLVEPNP_SQPNP)
-    if not ok:
-        ok, rvec, tvec = cv2.solvePnP(obj, img, K, dist, flags=cv2.SOLVEPNP_ITERATIVE)
-    if not ok:
-        raise ValueError("solvePnP failed — check pin placement")
+    def solve_at(fov):
+        K = intrinsics(image_size_px, fov)
+        res = _ippe_back_wall(back_img, back_world, K)
+        if res is None:
+            return None
+        rvec, tvec = res
+        err = _edge_direction_error(K, rvec, tvec, back_world, near_world, drawn_dir)
+        return (err, fov, rvec, tvec, K)
 
-    camera_position, camera_look_at = _pose_to_threejs(rvec, tvec)
+    if known_fov_deg and known_fov_deg > 0:
+        chosen = solve_at(float(known_fov_deg))
+        if chosen is None:
+            raise ValueError("pose solve failed at the camera's FOV")
+        fov_solved = False
+    else:
+        # Coarse search then refine — find the FOV whose receding edges match.
+        best = None
+        for fov in np.arange(25.0, 120.5, 1.0):
+            cand = solve_at(fov)
+            if cand and (best is None or cand[0] < best[0]):
+                best = cand
+        if best is None:
+            raise ValueError("pose solve failed — check back-wall pins")
+        f0 = best[1]
+        for fov in np.arange(max(25.0, f0 - 2.0), min(120.0, f0 + 2.0) + 0.01, 0.25):
+            cand = solve_at(fov)
+            if cand and cand[0] < best[0]:
+                best = cand
+        chosen = best
+        fov_solved = True
 
-    proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
-    residual_px = float(np.mean(np.linalg.norm(proj.reshape(-1, 2) - img, axis=1)))
+    _, fov, rvec, tvec, K = chosen
+    cam_pos, look_at, up = _pose_to_threejs(rvec, tvec)
+
+    bp, _ = cv2.projectPoints(back_world, rvec, tvec, K, np.zeros(4))
+    residual_px = float(np.mean(np.linalg.norm(bp.reshape(-1, 2) - back_img, axis=1)))
 
     result = {
-        "camera_position": camera_position,
-        "camera_look_at": camera_look_at,
+        "camera_position": cam_pos,
+        "camera_look_at": look_at,
+        "camera_up": up,
+        "camera_fov_deg": float(fov),
+        "fov_solved": fov_solved,
         "residual_px": residual_px,
     }
 
-    # Door derivation (optional — only if 4 door points provided)
     if door_image_points and len(door_image_points) == 4:
         pts = _backproject_to_z0(door_image_points, K, rvec, tvec)
         if all(p is not None for p in pts):
             tl, tr, br, bl = pts
             width = (abs(tr[0] - tl[0]) + abs(br[0] - bl[0])) / 2.0
             height = (abs(tl[1] - bl[1]) + abs(tr[1] - br[1])) / 2.0
-            center_x = float((tl[0] + tr[0] + bl[0] + br[0]) / 4.0)
-            # Clamp to sane ranges so a bad pin doesn't produce a monster door.
-            width = float(max(0.5, min(garage_w, width)))
-            height = float(max(0.5, min(garage_h, height)))
-            result["door_opening_width"] = width
-            result["door_opening_height"] = height
-            result["door_center_x"] = center_x
+            result["door_opening_width"] = float(max(0.5, min(garage_w, width)))
+            result["door_opening_height"] = float(max(0.5, min(garage_h, height)))
+            result["door_center_x"] = float((tl[0] + tr[0] + bl[0] + br[0]) / 4.0)
 
     return result

@@ -159,8 +159,10 @@ body {
 
 .pose-svg .pin-edge { fill: none; stroke-width: 1; pointer-events: none; }
 .pose-svg .pin-edge--back { stroke: rgba(98, 231, 255, 0.55); }
-.pose-svg .pin-edge--near { stroke: rgba(138, 160, 181, 0.4); stroke-dasharray: 5 4; }
+.pose-svg .pin-edge--near { stroke: rgba(138, 160, 181, 0.45); stroke-dasharray: 5 4; }
 .pose-svg .pin-edge--door { stroke: rgba(255, 200, 87, 0.6); }
+/* The solved-fit box reprojected from the computed pose. */
+.pose-svg .pin-edge--solved { stroke: rgba(74, 222, 128, 0.9); stroke-width: 1.5; }
 
 .pose-key {
   font-weight: 700;
