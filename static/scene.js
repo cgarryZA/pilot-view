@@ -59,15 +59,45 @@ function planeColorFor(state) {
 
 // ─── garage walls ───────────────────────────────────────────────────────
 // Each wall: { side, plane (Mesh), edges (LineSegments), planeMat, edgeMat, center, normal }
-function buildGarageWalls(w, l, h) {
+// The entrance wall (rear, z=0) is split into three sections framing the door
+// opening; the door panel itself is built separately and animates vertically.
+function buildGarageWalls(w, l, h, doorW, doorH) {
+  const inwardZ = new THREE.Vector3(0, 0, 1);
+  const inwardNegZ = new THREE.Vector3(0, 0, -1);
+  const inwardX = new THREE.Vector3(1, 0, 0);
+  const inwardNegX = new THREE.Vector3(-1, 0, 0);
+  const inwardY = new THREE.Vector3(0, 1, 0);
+  const inwardNegY = new THREE.Vector3(0, -1, 0);
+
+  // Clamp the door opening to fit the garage face.
+  const dw = Math.min(doorW, w);
+  const dh = Math.min(doorH, h);
+
+  // Side strips left and right of the doorway, plus the lintel above it.
+  const sideStripW = (w - dw) / 2;
+  const lintelH = h - dh;
+
+  // For wall coloring, all three rear sections share the "rear" side label
+  // (so the existing clearance-driven highlight still works as a single unit).
   const wallDefs = [
-    // side    width   height   position                    rotation (axis,deg)        normal (into garage)
-    { side: 'rear',    sx: w, sy: h, pos: [0, h/2, 0],     rot: [0, 0, 0],       normal: new THREE.Vector3(0, 0, 1) },
-    { side: 'front',   sx: w, sy: h, pos: [0, h/2, l],     rot: [0, Math.PI, 0], normal: new THREE.Vector3(0, 0, -1) },
-    { side: 'left',    sx: l, sy: h, pos: [-w/2, h/2, l/2],rot: [0, Math.PI/2, 0], normal: new THREE.Vector3(1, 0, 0) },
-    { side: 'right',   sx: l, sy: h, pos: [w/2, h/2, l/2], rot: [0, -Math.PI/2, 0], normal: new THREE.Vector3(-1, 0, 0) },
-    { side: 'ceiling', sx: w, sy: l, pos: [0, h, l/2],     rot: [Math.PI/2, 0, 0],  normal: new THREE.Vector3(0, -1, 0) },
-    { side: 'floor',   sx: w, sy: l, pos: [0, 0, l/2],     rot: [-Math.PI/2, 0, 0], normal: new THREE.Vector3(0, 1, 0) },
+    // ── Rear (entrance) wall, split into 3 panels around the door opening ──
+    ...(sideStripW > 0.001 ? [
+      { side: 'rear', sx: sideStripW, sy: h, pos: [-(w/2 - sideStripW/2), h/2, 0],
+        rot: [0, 0, 0], normal: inwardZ },
+      { side: 'rear', sx: sideStripW, sy: h, pos: [w/2 - sideStripW/2, h/2, 0],
+        rot: [0, 0, 0], normal: inwardZ },
+    ] : []),
+    ...(lintelH > 0.001 ? [
+      { side: 'rear', sx: dw, sy: lintelH, pos: [0, h - lintelH/2, 0],
+        rot: [0, 0, 0], normal: inwardZ },
+    ] : []),
+
+    // ── Other walls unchanged ──
+    { side: 'front',   sx: w, sy: h, pos: [0, h/2, l],     rot: [0, Math.PI, 0], normal: inwardNegZ },
+    { side: 'left',    sx: l, sy: h, pos: [-w/2, h/2, l/2],rot: [0, Math.PI/2, 0], normal: inwardX },
+    { side: 'right',   sx: l, sy: h, pos: [w/2, h/2, l/2], rot: [0, -Math.PI/2, 0], normal: inwardNegX },
+    { side: 'ceiling', sx: w, sy: l, pos: [0, h, l/2],     rot: [Math.PI/2, 0, 0],  normal: inwardNegY },
+    { side: 'floor',   sx: w, sy: l, pos: [0, 0, l/2],     rot: [-Math.PI/2, 0, 0], normal: inwardY },
   ];
 
   const walls = [];
@@ -75,7 +105,7 @@ function buildGarageWalls(w, l, h) {
     const planeMat = new THREE.MeshBasicMaterial({
       color: COLOR.planeBase,
       transparent: true,
-      opacity: 0,                 // hidden by default; orbit mode raises this
+      opacity: 0,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
@@ -103,6 +133,40 @@ function buildGarageWalls(w, l, h) {
     });
   }
   return walls;
+}
+
+// ─── roller door panel (lives in the entrance opening, slides vertically) ──
+function buildRollerDoor(doorW, doorH) {
+  const group = new THREE.Group();
+
+  // Frame outline (the panel itself) — a rectangle in the XY plane at z=0.
+  const halfW = doorW / 2;
+  const frame = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-halfW, 0, 0),     new THREE.Vector3(halfW, 0, 0),
+      new THREE.Vector3(halfW, 0, 0),      new THREE.Vector3(halfW, doorH, 0),
+      new THREE.Vector3(halfW, doorH, 0),  new THREE.Vector3(-halfW, doorH, 0),
+      new THREE.Vector3(-halfW, doorH, 0), new THREE.Vector3(-halfW, 0, 0),
+    ]),
+    new THREE.LineBasicMaterial({ color: COLOR.edgeBase, transparent: true, opacity: 0.9 })
+  );
+  group.add(frame);
+
+  // Horizontal slats spaced every ~12cm to suggest a roller door.
+  const slatSpacing = 0.12;
+  const slatCount = Math.max(2, Math.floor(doorH / slatSpacing) - 1);
+  const slatPts = [];
+  for (let i = 1; i <= slatCount; i++) {
+    const y = (i / (slatCount + 1)) * doorH;
+    slatPts.push(new THREE.Vector3(-halfW, y, 0), new THREE.Vector3(halfW, y, 0));
+  }
+  const slats = new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(slatPts),
+    new THREE.LineBasicMaterial({ color: COLOR.edgeBase, transparent: true, opacity: 0.55 })
+  );
+  group.add(slats);
+
+  return { group, frame, slats, height: doorH, width: doorW };
 }
 
 // ─── car bounding box (per-face) ────────────────────────────────────────
@@ -207,20 +271,43 @@ export function createScene(container) {
   // ─── garage state ───
   const garage = {
     group: new THREE.Group(),
-    walls: [],            // [{side, plane, edges, ...}]
+    walls: [],
     width: null, length: null, height: null,
+    doorOpeningWidth: null, doorOpeningHeight: null,
+    door: null,   // { group, frame, slats, height, width }
   };
   scene.add(garage.group);
 
-  function rebuildGarage(w, l, h) {
-    if (garage.width === w && garage.length === l && garage.height === h) return;
+  // Door animation state — interpolates the panel up/down based on payload.door
+  const doorAnim = {
+    lastStatus: null,
+    direction: 0,         // +1 opening, -1 closing, 0 still
+    transitionStart: 0,   // performance.now() when transition began
+    durationMs: 4000,     // matches TRANSITION_SECONDS in app/door.py
+    progress: 0,          // 0 = fully closed, 1 = fully open
+  };
+
+  function rebuildGarage(w, l, h, doorW = 2.4, doorH = 2.0) {
+    const needsRebuild = (
+      garage.width !== w || garage.length !== l || garage.height !== h ||
+      garage.doorOpeningWidth !== doorW || garage.doorOpeningHeight !== doorH
+    );
+    if (!needsRebuild) return;
+
     garage.group.clear();
-    garage.walls = buildGarageWalls(w, l, h);
+    garage.walls = buildGarageWalls(w, l, h, doorW, doorH);
     for (const wall of garage.walls) {
       garage.group.add(wall.plane);
       garage.group.add(wall.edges);
     }
+
+    // Roller door panel sits at z=0 (entrance plane), centred in the X-axis.
+    garage.door = buildRollerDoor(doorW, doorH);
+    garage.door.group.position.set(0, 0, 0);
+    garage.group.add(garage.door.group);
+
     garage.width = w; garage.length = l; garage.height = h;
+    garage.doorOpeningWidth = doorW; garage.doorOpeningHeight = doorH;
 
     // Orbit camera default target = middle of garage interior (liveCamera position
     // is owned by calibration, see applyCalibration).
@@ -388,9 +475,25 @@ export function createScene(container) {
 
     if (mode === 'orbit') controls.update();
     updateWallOpacities();
+    updateDoorPosition(t);
     renderer.render(scene, activeCamera);
   }
   tick();
+
+  function updateDoorPosition(now) {
+    if (!garage.door) return;
+    const doorH = garage.doorOpeningHeight || 0;
+    let target;
+    if (doorAnim.direction !== 0) {
+      const elapsed = now - doorAnim.transitionStart;
+      const t01 = Math.min(1, Math.max(0, elapsed / doorAnim.durationMs));
+      if (doorAnim.direction > 0) doorAnim.progress = t01;
+      else                         doorAnim.progress = 1 - t01;
+      if (t01 >= 1) doorAnim.direction = 0;  // settled
+    }
+    // progress 0 = closed (panel at floor), 1 = open (panel up at ceiling).
+    garage.door.group.position.y = doorAnim.progress * doorH;
+  }
 
   function getFps() {
     return frameTimes.length;
@@ -401,7 +504,10 @@ export function createScene(container) {
     if (!geom) return;
 
     if (geom.garage) {
-      rebuildGarage(geom.garage.width, geom.garage.length, geom.garage.height);
+      rebuildGarage(
+        geom.garage.width, geom.garage.length, geom.garage.height,
+        geom.garage.door_opening_width, geom.garage.door_opening_height,
+      );
     }
     if (geom.car) {
       if (geom.car.extent) {
@@ -465,6 +571,41 @@ export function createScene(container) {
     car.meshHolder.scale.set(sx, s, s);
   }
 
+  function applyDoor(d) {
+    if (!d) return;
+    const status = d.status;
+    if (status === doorAnim.lastStatus) return;
+
+    const previous = doorAnim.lastStatus;
+    doorAnim.lastStatus = status;
+
+    // Snap when status is a terminal state, animate when transitioning.
+    if (status === 'closed') {
+      doorAnim.direction = 0;
+      doorAnim.progress = 0;
+    } else if (status === 'open') {
+      doorAnim.direction = 0;
+      doorAnim.progress = 1;
+    } else if (status === 'partial') {
+      // Derive direction from the previous status — partial means moving.
+      if (previous === 'closed') {
+        doorAnim.direction = 1;
+        doorAnim.transitionStart = performance.now();
+        doorAnim.progress = 0;
+      } else if (previous === 'open') {
+        doorAnim.direction = -1;
+        doorAnim.transitionStart = performance.now();
+        doorAnim.progress = 1;
+      } else if (previous === null) {
+        // First payload reports partial — middle of travel; show as half-open.
+        doorAnim.direction = 0;
+        doorAnim.progress = 0.5;
+      }
+    } else if (status === 'fault') {
+      // Don't move; whatever position we have, keep.
+    }
+  }
+
   function applyCalibration(cal) {
     if (!cal) return;
     // Vehicle-specific things live in applyActiveVehicle.
@@ -473,7 +614,7 @@ export function createScene(container) {
     if (cal.garage) {
       const g = cal.garage;
       if (typeof g.width === 'number' && typeof g.length === 'number' && typeof g.height === 'number') {
-        rebuildGarage(g.width, g.length, g.height);
+        rebuildGarage(g.width, g.length, g.height, g.door_opening_width, g.door_opening_height);
       }
     }
 
@@ -503,6 +644,7 @@ export function createScene(container) {
     applyGeometry,
     applyCalibration,
     applyActiveVehicle,
+    applyDoor,
     setMode,
     destroy,
     getFps,

@@ -34,7 +34,15 @@ def _vehicle_defaults(
 
 
 DEFAULTS: dict[str, Any] = {
-    "garage": {"width": 3.0, "length": 5.8, "height": 2.3},
+    "garage": {
+        "width": 3.0,
+        "length": 5.8,
+        "height": 2.3,
+        # Door opening cut into the entrance wall. The roller door panel slides
+        # vertically inside this rectangle. Sensible UK single-garage default.
+        "door_opening_width": 2.4,
+        "door_opening_height": 2.0,
+    },
     "vehicles": {
         "active_id": "lambo",
         "registry": {

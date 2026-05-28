@@ -67,6 +67,8 @@ class SyntheticSource(CameraSource):
                     "width": garage["width"],
                     "length": garage["length"],
                     "height": garage["height"],
+                    "door_opening_width": garage.get("door_opening_width", 2.4),
+                    "door_opening_height": garage.get("door_opening_height", 2.0),
                 },
                 "car": {
                     "position": {"x": car_x, "y": car_y, "z": car_z},

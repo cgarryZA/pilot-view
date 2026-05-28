@@ -580,6 +580,9 @@ function applyState(payload) {
   applyDoorState(payload.door);
   applyLightsState(payload.lights);
 
+  // Animate the roller door in the 3D scene
+  if (scene && scene.applyDoor) scene.applyDoor(payload.door);
+
   // Environment pills
   applyEnvironment(payload.environment);
 
