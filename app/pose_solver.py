@@ -61,15 +61,36 @@ def intrinsics(image_size_px: Tuple[int, int], fov_deg: float) -> np.ndarray:
     return np.array([[fx, 0, w / 2.0], [0, fy, h / 2.0], [0, 0, 1.0]], dtype=np.float64)
 
 
-def _solve(obj_pts: np.ndarray, img_pts: np.ndarray, K: np.ndarray):
+def _solve_back_wall(back_img_pts: np.ndarray, width: float, height: float, K: np.ndarray):
+    """Solve pose from the 4 back-wall corners (a known width×height rectangle on
+    z=0). IPPE returns the two mirror-ambiguous solutions for a coplanar target;
+    we pick the physically valid one (camera above the floor, inside the garage)."""
+    obj = np.array([
+        [-width / 2, height, 0.0],  # back_tl
+        [ width / 2, height, 0.0],  # back_tr
+        [ width / 2, 0.0,    0.0],  # back_br
+        [-width / 2, 0.0,    0.0],  # back_bl
+    ], dtype=np.float64)
     dist = np.zeros(4, dtype=np.float64)
-    # SQPNP is robust for general (non-coplanar) point sets.
-    ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, dist, flags=cv2.SOLVEPNP_SQPNP)
-    if not ok:
-        ok, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, K, dist, flags=cv2.SOLVEPNP_ITERATIVE)
-    if not ok:
-        raise ValueError("solvePnP failed — check pin placement")
-    return rvec, tvec
+
+    try:
+        n, rvecs, tvecs, _ = cv2.solvePnPGeneric(
+            obj, back_img_pts, K, dist, flags=cv2.SOLVEPNP_IPPE
+        )
+    except cv2.error as exc:
+        raise ValueError(f"solvePnP failed: {exc}")
+    if n < 1:
+        raise ValueError("solvePnP found no solution — check pin placement")
+
+    best = None
+    for rvec, tvec in zip(rvecs, tvecs):
+        R, _ = cv2.Rodrigues(rvec)
+        cam = (-R.T @ tvec).flatten()
+        # Score physical plausibility: camera above floor and inside the garage.
+        score = (1 if cam[1] > 0 else 0) + (1 if cam[2] > 0 else 0)
+        if best is None or score > best[0]:
+            best = (score, rvec, tvec)
+    return best[1], best[2]
 
 
 def _pose_to_threejs(rvec: np.ndarray, tvec: np.ndarray) -> Tuple[dict, dict]:
@@ -111,28 +132,31 @@ def solve_full(
     garage_l: float,
     garage_h: float,
 ) -> dict:
-    """Solve camera pose from the 8 room corners, then derive door dimensions
-    from the 4 door corners via back-projection onto z=0.
+    """Solve camera pose from the 4 BACK-WALL corners (the only reliable, on-screen,
+    known-size reference). The near corners are off-camera and aren't used. Door
+    dimensions are derived from the 4 door corners via back-projection onto z=0.
 
-    Returns camera_position, camera_look_at, door_opening_{width,height},
-    door_center_x, and reprojection residual.
+    room_image_points is still the full 8 (near 0-3, back 4-7) for API symmetry,
+    but only the back four (4-7) drive the solve.
     """
     if len(room_image_points) != 8:
-        raise ValueError("need 8 room image points")
+        raise ValueError("need 8 room image points (near 0-3, back 4-7)")
     if fov_deg <= 0 or fov_deg >= 180:
         raise ValueError("fov_deg out of range")
 
     K = intrinsics(image_size_px, fov_deg)
-    room_world_map = room_corners_world(garage_w, garage_l, garage_h)
-    obj = np.array([room_world_map[k] for k in ROOM_ORDER], dtype=np.float64)
-    img = np.array(room_image_points, dtype=np.float64)
+    back_img = np.array(room_image_points[4:8], dtype=np.float64)
 
-    rvec, tvec = _solve(obj, img, K)
+    rvec, tvec = _solve_back_wall(back_img, garage_w, garage_h, K)
     camera_position, camera_look_at = _pose_to_threejs(rvec, tvec)
 
-    # Residual on the room corners
-    proj, _ = cv2.projectPoints(obj, rvec, tvec, K, np.zeros(4))
-    residual_px = float(np.mean(np.linalg.norm(proj.reshape(-1, 2) - img, axis=1)))
+    # Residual on the back-wall corners
+    back_obj = np.array([
+        [-garage_w / 2, garage_h, 0.0], [garage_w / 2, garage_h, 0.0],
+        [ garage_w / 2, 0.0,      0.0], [-garage_w / 2, 0.0,      0.0],
+    ], dtype=np.float64)
+    proj, _ = cv2.projectPoints(back_obj, rvec, tvec, K, np.zeros(4))
+    residual_px = float(np.mean(np.linalg.norm(proj.reshape(-1, 2) - back_img, axis=1)))
 
     result = {
         "camera_position": camera_position,

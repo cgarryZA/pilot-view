@@ -88,6 +88,7 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
         door = payload.get("door_points") or []
         size = payload["image_size"]
         fov = float(payload.get("fov_deg") or 50.0)
+        apply = bool(payload.get("apply", True))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(400, f"invalid payload: {exc}")
 
@@ -129,7 +130,10 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
     if garage_updates:
         updates["garage"] = garage_updates
 
-    calibration.save(updates)
+    # Preview solves (apply=false) return the pose without persisting, so the
+    # UI can show the live box alignment as the user drags pins.
+    if apply:
+        calibration.save(updates)
     return result
 
 

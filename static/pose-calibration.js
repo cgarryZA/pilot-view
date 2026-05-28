@@ -6,19 +6,20 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // Node order MUST match the backend's ROOM_ORDER + DOOR_ORDER.
 //   room (8): near_tl,tr,br,bl  then  back_tl,tr,br,bl
 //   door (4): door_tl,tr,br,bl
+// near corners are computed guides (not draggable); back + door are draggable.
 const NODES = [
-  { key: 'near_tl', label: 'TL', group: 'near' },
-  { key: 'near_tr', label: 'TR', group: 'near' },
-  { key: 'near_br', label: 'BR', group: 'near' },
-  { key: 'near_bl', label: 'BL', group: 'near' },
-  { key: 'back_tl', label: 'TL', group: 'back' },
-  { key: 'back_tr', label: 'TR', group: 'back' },
-  { key: 'back_br', label: 'BR', group: 'back' },
-  { key: 'back_bl', label: 'BL', group: 'back' },
-  { key: 'door_tl', label: 'TL', group: 'door' },
-  { key: 'door_tr', label: 'TR', group: 'door' },
-  { key: 'door_br', label: 'BR', group: 'door' },
-  { key: 'door_bl', label: 'BL', group: 'door' },
+  { key: 'near_tl', label: 'TL', group: 'near', draggable: false },
+  { key: 'near_tr', label: 'TR', group: 'near', draggable: false },
+  { key: 'near_br', label: 'BR', group: 'near', draggable: false },
+  { key: 'near_bl', label: 'BL', group: 'near', draggable: false },
+  { key: 'back_tl', label: 'TL', group: 'back', draggable: true },
+  { key: 'back_tr', label: 'TR', group: 'back', draggable: true },
+  { key: 'back_br', label: 'BR', group: 'back', draggable: true },
+  { key: 'back_bl', label: 'BL', group: 'back', draggable: true },
+  { key: 'door_tl', label: 'TL', group: 'door', draggable: true },
+  { key: 'door_tr', label: 'TR', group: 'door', draggable: true },
+  { key: 'door_br', label: 'BR', group: 'door', draggable: true },
+  { key: 'door_bl', label: 'BL', group: 'door', draggable: true },
 ];
 
 // Edges to draw (indices into NODES) — the garage cuboid + door rectangle.
@@ -52,23 +53,25 @@ function worldPoints(cal) {
   ];
 }
 
+function projectWith(camPos, lookAt, fov, worldPts, imgW, imgH) {
+  const cam = new THREE.PerspectiveCamera(fov, imgW / imgH, 0.05, 200);
+  cam.position.set(camPos.x, camPos.y, camPos.z);
+  cam.lookAt(lookAt.x, lookAt.y, lookAt.z);
+  cam.updateMatrixWorld(true);
+  return worldPts.map(([x, y, z]) => {
+    const v = new THREE.Vector3(x, y, z).project(cam);
+    return { x: (v.x + 1) / 2 * imgW, y: (1 - (v.y + 1) / 2) * imgH };
+  });
+}
+
 function projectAll(cal, imgW, imgH) {
   const lv = cal?.live_view || {};
-  const fov = lv.camera_fov_deg || 50;
-  const cam = new THREE.PerspectiveCamera(fov, imgW / imgH, 0.05, 200);
-  const p = lv.camera_position || { x: 0, y: 1.45, z: 5.6 };
-  const t = lv.camera_look_at || { x: 0, y: 0.6, z: 0 };
-  cam.position.set(p.x, p.y, p.z);
-  cam.lookAt(t.x, t.y, t.z);
-  cam.updateMatrixWorld(true);
-
-  return worldPoints(cal).map(([x, y, z]) => {
-    const v = new THREE.Vector3(x, y, z).project(cam);
-    return {
-      x: (v.x + 1) / 2 * imgW,
-      y: (1 - (v.y + 1) / 2) * imgH,
-    };
-  });
+  return projectWith(
+    lv.camera_position || { x: 0, y: 1.45, z: 5.6 },
+    lv.camera_look_at || { x: 0, y: 0.6, z: 0 },
+    lv.camera_fov_deg || 50,
+    worldPoints(cal), imgW, imgH,
+  );
 }
 
 export function createPoseCalibration({ onPoseApplied }) {
@@ -108,14 +111,15 @@ export function createPoseCalibration({ onPoseApplied }) {
     });
 
     NODES.forEach((node, idx) => {
-      const g = nsel('g', { class: `pin pin--${node.group}`, 'data-idx': idx });
-      const ring = nsel('circle', { class: 'pin-ring', r: 18 });
+      const cls = `pin pin--${node.group}${node.draggable ? '' : ' pin--guide'}`;
+      const g = nsel('g', { class: cls, 'data-idx': idx });
+      const ring = nsel('circle', { class: 'pin-ring', r: node.draggable ? 18 : 12 });
       const crossH = nsel('line', { class: 'pin-cross' });
       const crossV = nsel('line', { class: 'pin-cross' });
       const label = nsel('text', { class: 'pin-label' });
       label.textContent = node.label;
       g.append(ring, crossH, crossV, label);
-      g.addEventListener('pointerdown', onPinDown);
+      if (node.draggable) g.addEventListener('pointerdown', onPinDown);
       svg.appendChild(g);
       pinEls.push({ g, ring, crossH, crossV, label });
     });
@@ -178,7 +182,46 @@ export function createPoseCalibration({ onPoseApplied }) {
     g.removeEventListener('pointerup', onPinUp);
     g.removeEventListener('pointercancel', onPinUp);
     drag = null;
-    // No auto-solve — user clicks Apply when all pins are placed.
+    // Live preview: solve (without saving) and reposition the grey guide
+    // corners so you can see the box align. Apply persists.
+    previewSolve();
+  }
+
+  let previewTimer = null;
+  function previewSolve() {
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(doPreviewSolve, 100);
+  }
+
+  async function doPreviewSolve() {
+    const fov = currentCal?.live_view?.camera_fov_deg || 50;
+    try {
+      const res = await fetch('/api/calibration/solve_pose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          room_points: pins.slice(0, 8).map((p) => [p.x, p.y]),
+          door_points: pins.slice(8, 12).map((p) => [p.x, p.y]),
+          image_size: { width: imageSize.w, height: imageSize.h },
+          fov_deg: fov,
+          apply: false,
+        }),
+      });
+      if (!res.ok) { residualEl.textContent = 'error'; return; }
+      const data = await res.json();
+      residualEl.textContent = `${data.residual_px.toFixed(1)} px`;
+      // Reproject the 4 near guide corners from the solved pose.
+      const nearWorld = worldPoints(currentCal).slice(0, 4);
+      const near = projectWith(
+        data.camera_position, data.camera_look_at, fov,
+        nearWorld, imageSize.w, imageSize.h,
+      );
+      for (let i = 0; i < 4; i++) pins[i] = near[i];
+      updatePinPositions();
+    } catch (err) {
+      console.error('[pose] preview failed', err);
+    }
   }
 
   function clientToImage(clientX, clientY) {
