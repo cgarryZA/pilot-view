@@ -247,45 +247,56 @@ def solve_full(
 
     have_fov = bool(known_fov_deg and known_fov_deg > 0)
 
-    # ── initialise pose from IPPE on the back wall (camera-above-floor branch) ──
-    init_fov = float(known_fov_deg) if have_fov else 60.0
-    K_init = intrinsics(image_size_px, init_fov)
-    init = _ippe_back_wall(back_img, back_world, near_world, drawn_dir, K_init)
-    if init is None:
-        raise ValueError("pose solve failed — check back-wall pins")
-    rvec0, tvec0 = init
-    f_init = _f_from_fov(h_px, init_fov)
-
-    fixed_f = f_init if have_fov else None
-    residuals = _make_residuals(
-        back_world, near_world, back_img, drawn_dir, cx, cy, diag, fixed_f
-    )
+    def solve_pose_at_fov(fov_deg):
+        """Pose-only refine at a FIXED FOV — a well-conditioned 6-DoF problem.
+        Returns (rvec, tvec, dir_err) where dir_err is the leftover receding-edge
+        mismatch (this is the only term that carries FOV information)."""
+        K = intrinsics(image_size_px, fov_deg)
+        init = _ippe_back_wall(back_img, back_world, near_world, drawn_dir, K)
+        if init is None:
+            return None
+        rvec0, tvec0 = init
+        residuals = _make_residuals(
+            back_world, near_world, back_img, drawn_dir, cx, cy, diag,
+            fixed_f=_f_from_fov(h_px, fov_deg),
+        )
+        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0)])
+        sol = least_squares(residuals, x0, method="lm", max_nfev=300)
+        rvec = sol.x[0:3].reshape(3, 1)
+        tvec = sol.x[3:6].reshape(3, 1)
+        dir_err = _direction_error(K, rvec, tvec, back_world, near_world, drawn_dir)
+        return rvec, tvec, dir_err
 
     if have_fov:
-        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0)])
-        sol = least_squares(residuals, x0, method="lm", max_nfev=400)
-        params = sol.x
-        f_solved = f_init
+        # Real camera FOV from intrinsics — trust it, only refine pose.
+        out = solve_pose_at_fov(float(known_fov_deg))
+        if out is None:
+            raise ValueError("pose solve failed at the camera's FOV")
+        rvec, tvec, _ = out
+        fov = float(known_fov_deg)
         fov_solved = False
     else:
-        x0 = np.concatenate([np.ravel(rvec0), np.ravel(tvec0), [f_init]])
-        # Keep focal length inside FOV ∈ [10°, 150°] so it can't run away.
-        f_lo = _f_from_fov(h_px, 150.0)
-        f_hi = _f_from_fov(h_px, 10.0)
-        lower = np.array([-np.inf] * 6 + [f_lo])
-        upper = np.array([np.inf] * 6 + [f_hi])
-        sol = least_squares(
-            residuals, x0, method="trf", bounds=(lower, upper),
-            x_scale="jac", max_nfev=600,
-        )
-        params = sol.x
-        f_solved = float(params[6])
+        # No intrinsics: find the FOV whose receding edges best match the drawn
+        # directions. A 1-D argmin over well-conditioned pose solves — stable,
+        # never runs away (unlike a free joint optimisation).
+        best = None  # (dir_err, fov, rvec, tvec)
+        for fov_deg in np.arange(25.0, 120.5, 1.0):
+            out = solve_pose_at_fov(fov_deg)
+            if out is None:
+                continue
+            if best is None or out[2] < best[0]:
+                best = (out[2], fov_deg, out[0], out[1])
+        if best is None:
+            raise ValueError("pose solve failed — check back-wall pins")
+        f0 = best[1]
+        for fov_deg in np.arange(max(25.0, f0 - 2.0), min(120.0, f0 + 2.0) + 0.01, 0.25):
+            out = solve_pose_at_fov(fov_deg)
+            if out is not None and out[2] < best[0]:
+                best = (out[2], fov_deg, out[0], out[1])
+        _, fov, rvec, tvec = best
         fov_solved = True
 
-    rvec = np.asarray(params[0:3], dtype=np.float64).reshape(3, 1)
-    tvec = np.asarray(params[3:6], dtype=np.float64).reshape(3, 1)
-    K = _K_from_f(f_solved, cx, cy)
-    fov = _fov_from_f(h_px, f_solved)
+    K = intrinsics(image_size_px, fov)
 
     cam_pos, look_at, up = _pose_to_threejs(rvec, tvec)
 
