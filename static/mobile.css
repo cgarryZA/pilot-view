@@ -55,11 +55,15 @@ body { overflow: hidden; }
 .m-chip {
   display: inline-flex; align-items: center; gap: 6px;
   background: rgba(7,13,24,.82); border: 1px solid var(--line); border-radius: 999px;
-  padding: 6px 11px; font-size: 12px; font-weight: 600; letter-spacing: .03em;
-  backdrop-filter: blur(6px);
+  padding: 7px 12px; font-size: 12px; font-weight: 600; letter-spacing: .03em;
+  backdrop-filter: blur(6px); color: var(--text); font-family: inherit; line-height: 1;
 }
-.m-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px currentColor; }
-.m-chip.ok .m-dot { background: var(--safe); }
+.m-chip.tap { cursor: pointer; }
+.m-chip.tap:active { background: rgba(20,48,74,.92); }
+.m-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#chip-vehicle { max-width: 42vw; }
+.m-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px currentColor; }
+.m-dot.ok { background: var(--safe); }
 
 .m-viewtoggle {
   display: inline-flex; pointer-events: auto;
@@ -110,45 +114,6 @@ body { overflow: hidden; }
 .m-clear-cell.warn b { color: var(--warn); }
 .m-clear-cell.danger { background: rgba(255,107,107,.16); }
 .m-clear-cell.danger b { color: var(--danger); }
-
-/* ── controls ── */
-.m-controls {
-  flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px;
-  padding: 12px; background: var(--panel); border-top: 1px solid var(--line);
-}
-
-/* compact stat row: vehicle · battery · garage */
-.m-meta { display: flex; gap: 8px; }
-.m-meta-row {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px;
-  background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
-  padding: 7px 6px; min-width: 0;
-}
-.m-meta-k { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
-.m-meta-v {
-  font-size: 13px; font-weight: 700; text-align: center;
-  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-
-/* two big primary action buttons */
-.m-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.m-ctl {
-  appearance: none; border: 1px solid var(--line); border-radius: 14px;
-  background: var(--panel-2); color: var(--text);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-  padding: 14px; min-height: 66px; cursor: pointer; font: inherit;
-}
-.m-ctl:active { background: #14304a; }
-.m-ctl[disabled] { opacity: .5; }
-.m-ctl-title { font-size: 14px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
-.m-ctl-sub { font-size: 14px; color: var(--muted); }
-.m-ctl.on { border-color: var(--warn); background: rgba(255,200,87,.1); }
-.m-ctl.on .m-ctl-sub { color: var(--warn); }
-.m-ctl.open { border-color: var(--warn); }
-.m-ctl.closed { border-color: var(--safe); }
-.m-ctl.closed .m-ctl-sub { color: var(--safe); }
-.m-ctl.fault { border-color: var(--danger); }
-.m-ctl.fault .m-ctl-sub { color: var(--danger); }
 
 /* ── bottom tabs ── */
 .m-tabs {

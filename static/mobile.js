@@ -6,21 +6,15 @@ const els = {
   bg: $('m-bg'),
   canvas: $('m-canvas'),
   chipSource: $('chip-source'),
-  chipConn: $('chip-conn'),
-  connText: $('conn-text'),
+  chipVehicle: $('chip-vehicle'),
+  srcName: $('src-name'),
+  connDot: $('conn-dot'),
   viewToggle: $('viewtoggle'),
   stateBadge: $('state-badge'),
   stateText: $('state-text'),
   disc: $('disc'),
   discSub: $('disc-sub'),
   clearances: $('clearances'),
-  ctlDoor: $('ctl-door'),
-  doorSub: $('door-sub'),
-  ctlLights: $('ctl-lights'),
-  lightsSub: $('lights-sub'),
-  vehName: $('veh-name'),
-  batText: $('bat-text'),
-  envText: $('env-text'),
   toast: $('toast'),
   cl: {
     front: $('cl-front'), rear: $('cl-rear'), left: $('cl-left'),
@@ -28,14 +22,12 @@ const els = {
   },
 };
 
-const DOOR_LABELS = {
-  closed: 'Closed', open: 'Open', partial: 'Moving…', fault: 'Fault', unknown: '—',
-};
-
 let scene = null;
 let viewMode = 'live';
 let currentLiveUrl = null;
-let currentVehicleId = null;
+let connected = false;
+let currentSource = null;
+let vehicleDriver = null;
 
 function fmtM(v) {
   if (v == null || isNaN(v)) return '—';
@@ -51,14 +43,14 @@ function classifyClearance(v, t) {
 }
 
 let toastTimer = null;
-function showToast(msg, kind = 'info', ms = 2200) {
+function showToast(msg, kind = 'info', ms = 2000) {
   els.toast.textContent = msg;
   els.toast.className = `m-toast show ${kind}`;
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { els.toast.className = 'm-toast'; }, ms);
 }
 
-// ── view toggle ──
+// ── view toggle (live photo vs orbitable 3D) ──
 function setViewMode(next) {
   if (next === viewMode) return;
   viewMode = next;
@@ -74,9 +66,6 @@ els.viewToggle.addEventListener('click', (e) => {
 });
 
 function updateBgVisibility() {
-  const show = viewMode === 'live' && currentLiveUrl && !els.disc.classList.contains('hidden') === false;
-  // visible only in live mode, when we have a url AND we're connected (disc hidden)
-  const connected = els.disc.classList.contains('hidden');
   els.bg.classList.toggle('visible', viewMode === 'live' && !!currentLiveUrl && connected);
 }
 
@@ -88,21 +77,26 @@ function setLiveBackground(url) {
   updateBgVisibility();
 }
 
-// ── controls ──
-els.ctlDoor.addEventListener('click', async () => {
+// ── source toggle: synthetic <-> camera ──
+els.chipSource.addEventListener('click', async () => {
+  const next = currentSource === 'orbbec' ? 'synthetic' : 'orbbec';
   try {
-    const res = await fetch('/api/door/toggle', { method: 'POST' });
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (data?.blocked_reason) showToast(data.blocked_reason, 'warn');
-    } else {
-      showToast(`Door: HTTP ${res.status}`, 'danger');
-    }
-  } catch (err) { showToast('Door toggle failed', 'danger'); }
+    const res = await fetch('/api/source', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: next }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) showToast(`Source: ${data.current || next}`);
+    else showToast(data.detail || `Source switch failed`, 'danger');
+  } catch (err) { showToast('Source switch failed', 'danger'); }
 });
-els.ctlLights.addEventListener('click', async () => {
-  try { await fetch('/api/lights/toggle', { method: 'POST' }); }
-  catch (err) { showToast('Lights toggle failed', 'danger'); }
+
+// ── vehicle cycle (synthetic driver only) ──
+els.chipVehicle.addEventListener('click', async () => {
+  if (vehicleDriver !== 'synthetic') return;
+  try { await fetch('/api/vehicles/cycle', { method: 'POST' }); }
+  catch (err) { /* ignore */ }
 });
 
 // ── state application ──
@@ -110,48 +104,21 @@ function applyState(p) {
   const c = p.camera || {};
   const g = p.geometry;
 
-  els.chipSource.textContent = (p.source || '—').toUpperCase();
+  currentSource = p.source || null;
+  els.srcName.textContent = (p.source || '—').toUpperCase();
 
-  // door
-  const doorStatus = (p.door && p.door.status) || 'unknown';
-  els.doorSub.textContent = DOOR_LABELS[doorStatus] || '—';
-  els.ctlDoor.className = `m-ctl ${doorStatus}`;
-  els.ctlDoor.disabled = doorStatus === 'fault';
+  // roller-door panel in the 3D scene still animates from door status if present
   if (scene && scene.applyDoor) scene.applyDoor(p.door);
-
-  // lights
-  const lights = p.lights;
-  if (lights == null) { els.lightsSub.textContent = '?'; els.ctlLights.classList.remove('on'); }
-  else { els.lightsSub.textContent = lights.on ? 'On' : 'Off'; els.ctlLights.classList.toggle('on', !!lights.on); }
 
   // vehicle
   const v = p.vehicles;
-  els.vehName.textContent = v?.active?.name || (v?.active_id ? v.active_id : 'unknown');
-  if (v?.active && scene) {
-    scene.applyActiveVehicle(v.active);
-    currentVehicleId = v.active_id;
-  }
+  vehicleDriver = v?.driver || null;
+  els.chipVehicle.textContent = v?.active?.name || (v?.active_id || 'no vehicle');
+  els.chipVehicle.classList.toggle('tap', vehicleDriver === 'synthetic');
+  if (v?.active && scene) scene.applyActiveVehicle(v.active);
 
-  // battery
-  const b = p.battery;
-  if (b && b.available) {
-    const bits = [];
-    if (b.voltage != null) bits.push(`${Number(b.voltage).toFixed(1)} V`);
-    if (b.percent != null) bits.push(`${Math.round(b.percent)}%`);
-    els.batText.textContent = (bits.join(' · ') || '—') + (b.charging ? ' chg' : '');
-  } else {
-    els.batText.textContent = '—';
-  }
-
-  // environment
-  const env = p.environment || {};
-  const t = env.temperature_c, h = env.humidity_pct;
-  els.envText.textContent = (t != null ? `${t}°C` : '—') + (h != null ? ` · ${h}%` : '');
-
-  // connection / scene
-  const connected = !!c.connected && !!g;
-  els.chipConn.classList.toggle('ok', connected);
-  els.connText.textContent = connected ? 'live' : 'no signal';
+  connected = !!c.connected && !!g;
+  els.connDot.classList.toggle('ok', connected);
 
   if (connected) {
     els.disc.classList.add('hidden');
@@ -165,6 +132,7 @@ function applyState(p) {
     els.stateText.textContent = state.toUpperCase();
 
     const thr = g.thresholds || { warn: 0.5, danger: 0.2 };
+    const hasClear = g.clearances && Object.keys(g.clearances).length > 0;
     for (const [key, el] of Object.entries(els.cl)) {
       const val = g.clearances?.[key];
       el.textContent = fmtM(val);
@@ -174,6 +142,8 @@ function applyState(p) {
       if (cls === 'warning') cell.classList.add('warn');
       if (cls === 'danger') cell.classList.add('danger');
     }
+    // No car detected yet (e.g. camera live but detection not running): dim the strip.
+    els.clearances.style.opacity = hasClear ? '1' : '0.45';
   } else {
     els.disc.classList.remove('hidden');
     els.stateBadge.classList.add('hidden');
@@ -193,8 +163,8 @@ function connect() {
     catch (err) { console.error('bad payload', err); }
   };
   ws.onclose = () => {
-    els.chipConn.classList.remove('ok');
-    els.connText.textContent = 'reconnecting';
+    connected = false;
+    els.connDot.classList.remove('ok');
     setTimeout(connect, 1500);
   };
   ws.onerror = () => { try { ws.close(); } catch (e) {} };
@@ -203,7 +173,6 @@ function connect() {
 async function start() {
   scene = createScene(els.canvas);
   scene.setMode('live');
-  // Apply calibration (camera pose, garage dims) once on load.
   try {
     const cal = await fetch('/api/calibration', { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null);
     if (cal && scene.applyCalibration) scene.applyCalibration(cal);
