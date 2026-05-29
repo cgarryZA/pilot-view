@@ -1,0 +1,2 @@
+# Keep shell scripts LF so they run on the Pi regardless of the dev OS.
+*.sh text eol=lf
