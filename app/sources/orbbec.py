@@ -45,6 +45,9 @@ class OrbbecSource(CameraSource):
         self._latest_jpeg: Optional[bytes] = None
         self._last_frame_monotonic: float = 0.0
         self._fov_deg: Optional[float] = None   # vertical FOV from camera intrinsics
+        self._latest_depth = None               # HxW uint16
+        self._depth_scale: float = 1.0          # mm per depth unit
+        self._depth_intr = None                 # (fx, fy, cx, cy)
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -82,29 +85,48 @@ class OrbbecSource(CameraSource):
                 color_profile = self._pick_color_profile(pipeline)
                 config.enable_stream(color_profile)
                 self._read_intrinsics(color_profile)
+                # Depth too — feeds the point cloud / car detection. Best-effort:
+                # if depth can't be enabled we still stream colour.
+                depth_profile = self._pick_depth_profile(pipeline)
+                if depth_profile is not None:
+                    try:
+                        config.enable_stream(depth_profile)
+                        self._read_depth_intrinsics(depth_profile)
+                    except Exception as exc:
+                        print(f"[orbbec] depth enable failed: {exc}")
                 pipeline.start(config)
 
                 with self._lock:
                     self._last_error = None
 
-                # Inner frame loop
+                # Inner frame loop — handle colour and depth independently.
                 while self._running:
                     frames = pipeline.wait_for_frames(200)
                     if frames is None:
                         continue
                     color = frames.get_color_frame()
-                    if color is None:
-                        continue
-                    bgr = self._frame_to_bgr(color)
-                    if bgr is None:
-                        continue
-                    ok, buf = self._cv2.imencode(
-                        ".jpg", bgr, [int(self._cv2.IMWRITE_JPEG_QUALITY), 80]
-                    )
-                    if ok:
-                        with self._lock:
-                            self._latest_jpeg = buf.tobytes()
-                            self._last_frame_monotonic = time.monotonic()
+                    if color is not None:
+                        bgr = self._frame_to_bgr(color)
+                        if bgr is not None:
+                            ok, buf = self._cv2.imencode(
+                                ".jpg", bgr, [int(self._cv2.IMWRITE_JPEG_QUALITY), 80]
+                            )
+                            if ok:
+                                with self._lock:
+                                    self._latest_jpeg = buf.tobytes()
+                                    self._last_frame_monotonic = time.monotonic()
+                    depth = frames.get_depth_frame()
+                    if depth is not None:
+                        try:
+                            dh, dw = depth.get_height(), depth.get_width()
+                            dbuf = self._np.frombuffer(
+                                depth.get_data(), dtype=self._np.uint16
+                            ).reshape((dh, dw)).copy()
+                            with self._lock:
+                                self._latest_depth = dbuf
+                                self._depth_scale = float(depth.get_depth_scale())
+                        except Exception:
+                            pass
             except Exception as exc:
                 with self._lock:
                     self._device_info = None
@@ -146,6 +168,32 @@ class OrbbecSource(CameraSource):
                     self._fov_deg = round(fov, 2)
         except Exception as exc:
             print(f"[orbbec] could not read intrinsics: {exc}")
+
+    def _pick_depth_profile(self, pipeline):
+        sdk = self._sdk
+        try:
+            profiles = pipeline.get_stream_profile_list(sdk.OBSensorType.DEPTH_SENSOR)
+            return profiles.get_default_video_stream_profile()
+        except Exception as exc:
+            print(f"[orbbec] no depth profile: {exc}")
+            return None
+
+    def _read_depth_intrinsics(self, depth_profile) -> None:
+        try:
+            intr = depth_profile.get_intrinsic()
+            with self._lock:
+                self._depth_intr = (
+                    float(intr.fx), float(intr.fy), float(intr.cx), float(intr.cy)
+                )
+        except Exception as exc:
+            print(f"[orbbec] could not read depth intrinsics: {exc}")
+
+    def get_depth(self):
+        """(buf, scale, intr) for the latest depth frame, or None."""
+        with self._lock:
+            if self._latest_depth is None or self._depth_intr is None:
+                return None
+            return self._latest_depth, self._depth_scale, self._depth_intr
 
     def _pick_color_profile(self, pipeline):
         sdk = self._sdk

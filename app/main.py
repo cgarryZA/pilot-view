@@ -64,9 +64,19 @@ def depth_page():
     return FileResponse(STATIC_DIR / "depth.html")
 
 
+def _depth_frame():
+    """Prefer the active source's depth (orbbec, one shared pipeline); fall back
+    to the standalone depth camera (e.g. when running source=synthetic on dev)."""
+    d = source_manager.get_depth()
+    if d is not None:
+        return d
+    return depth.depth_camera.get_depth()
+
+
 @app.get("/api/depth/cloud")
 def depth_cloud():
-    data = depth.depth_camera.point_cloud()
+    d = _depth_frame()
+    data = depth.cloud_bytes(*d) if d else b""
     return Response(
         content=data,
         media_type="application/octet-stream",
@@ -74,9 +84,21 @@ def depth_cloud():
     )
 
 
+@app.get("/api/depth/segments")
+def depth_segments():
+    d = _depth_frame()
+    data = depth.segmented_bytes(*d) if d else b""
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"X-Point-Count": str(len(data) // 24), "Cache-Control": "no-store"},
+    )
+
+
 @app.get("/api/depth/status")
 def depth_status():
-    return depth.depth_camera.status()
+    src = source_manager.get_depth()
+    return {"source_has_depth": src is not None, **depth.depth_camera.status()}
 
 
 @app.get("/m")

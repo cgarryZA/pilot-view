@@ -101,6 +101,14 @@ class SourceManager:
         fn = getattr(src, "get_jpeg", None)
         return fn() if callable(fn) else None
 
+    def get_depth(self):
+        """Return (buf, scale, intr) from the current source's depth stream, or
+        None. Only sources that capture depth (orbbec) implement get_depth."""
+        with self._lock:
+            src = self._current
+        fn = getattr(src, "get_depth", None)
+        return fn() if callable(fn) else None
+
     def switch(self, name: str, persist: bool = True) -> str:
         name = (name or "").strip().lower()
         if name not in SOURCE_NAMES:
