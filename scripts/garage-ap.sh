@@ -132,7 +132,11 @@ cmd_confirm() {
   [ -n "$house" ] && "$NMCLI" con modify "$house" connection.autoconnect no 2>/dev/null || true
   "$NMCLI" con modify "$AP_CON" connection.autoconnect yes connection.autoconnect-priority 100 2>/dev/null || true
   echo "Confirmed. The Pi will boot straight into the '$AP_CON' access point."
-  echo "To get house Wi-Fi back later (e.g. to update):  sudo bash $0 off"
+  echo "Activating the AP now — this connection will drop; rejoin '$AP_CON' on your phone."
+  # Detached so it completes even though bringing up the AP kills this session.
+  systemd-run --unit=ap-up --collect "$NMCLI" con up "$AP_CON" >/dev/null 2>&1 \
+    || "$NMCLI" con up "$AP_CON" >/dev/null 2>&1 || true
+  echo "Open  http://${GATEWAY_IP}:8000   (terminal at /terminal). To undo: sudo bash $0 off"
 }
 
 cmd_off() {
