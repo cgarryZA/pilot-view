@@ -6,6 +6,15 @@
     <meta name="theme-color" content="#04070d" />
     <title>Pilot View</title>
     <link rel="stylesheet" href="/static/styles.css" />
+    <!-- three.js vendored locally so the app works with ZERO internet (garage AP). -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/static/vendor/three/three.module.js",
+          "three/addons/": "/static/vendor/three/addons/"
+        }
+      }
+    </script>
   </head>
   <body>
     <div class="app">

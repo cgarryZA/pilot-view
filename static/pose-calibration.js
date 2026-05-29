@@ -1,4 +1,4 @@
-import * as THREE from 'https://esm.sh/three@0.169.0';
+import * as THREE from 'three';
 
 const $ = (id) => document.getElementById(id);
 const SVG_NS = 'http://www.w3.org/2000/svg';
