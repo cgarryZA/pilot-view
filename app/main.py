@@ -3,10 +3,10 @@ import re
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, automations, calibration, diagnostics, pose_solver, terminal
+from app import auth, automations, calibration, depth, diagnostics, pose_solver, terminal
 from app.auth import require_auth, current_session
 from app.battery_monitor import battery_monitor
 from app.door import door
@@ -57,6 +57,26 @@ def index(request: Request):
         return FileResponse(MOBILE_HTML)
     is_mobile = bool(_MOBILE_UA.search(request.headers.get("user-agent", "")))
     return FileResponse(MOBILE_HTML if is_mobile else DESKTOP_HTML)
+
+
+@app.get("/depth")
+def depth_page():
+    return FileResponse(STATIC_DIR / "depth.html")
+
+
+@app.get("/api/depth/cloud")
+def depth_cloud():
+    data = depth.depth_camera.point_cloud()
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"X-Point-Count": str(len(data) // 12), "Cache-Control": "no-store"},
+    )
+
+
+@app.get("/api/depth/status")
+def depth_status():
+    return depth.depth_camera.status()
 
 
 @app.get("/m")

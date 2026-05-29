@@ -3,6 +3,16 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# Per-machine runtime config (source selection, RP id, etc.) — never commit;
+# each machine (PC dev box, Pi) keeps its own.
+.env
+
+# Orbbec SDK writes logs into the working directory.
+Log/
+
+# Scratch / experiment scripts.
+_*.py
+
 # Runtime calibration is per-machine — defaults live in app/calibration.py
 config/calibration.json
 

@@ -1,0 +1,15 @@
+# Pilot View runtime dependencies.
+# Install with:  pip install -r requirements.txt
+#
+# The Orbbec camera binding (pyorbbecsdk) is NOT listed here because it is
+# platform-specific and installed separately:
+#   - Raspberry Pi (aarch64): built from source -> package "pyorbbecsdk2" (imports as pyorbbecsdk)
+#   - Windows (x64):          prebuilt wheel from the Orbbec pyorbbecsdk releases
+# The app imports it lazily, so synthetic/disconnected modes run without it.
+
+fastapi
+uvicorn[standard]
+webauthn
+numpy
+opencv-python
+scipy
