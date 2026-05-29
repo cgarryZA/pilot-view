@@ -47,6 +47,7 @@
       <input id="psk-input" type="text" placeholder="Wi-Fi password (≥8 chars)" autocomplete="off" autocapitalize="off"
              style="flex:1;min-width:140px;background:#0e1c2c;color:#cfe6ff;border:1px solid #1f4a66;border-radius:8px;padding:9px;font:inherit;font-size:12px;" />
       <button id="finalize-btn" class="accent">Set up &amp; activate AP ✓</button>
+      <button class="cmd accent" data-cmd="cd ~/pilot-view && git pull --ff-only && sudo systemctl restart pilot-view">Update app ↻</button>
       <button class="cmd" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh status">AP status</button>
       <button class="cmd danger" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh off">AP off (back to house Wi-Fi)</button>
       <button id="clear-btn">Clear</button>

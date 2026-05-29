@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#04070d" />
+    <title>Pilot View</title>
+    <link rel="stylesheet" href="/static/mobile.css" />
+    <!-- three.js vendored locally so the app works with zero internet on the AP. -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/static/vendor/three/three.module.js",
+          "three/addons/": "/static/vendor/three/addons/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div class="m-app">
+      <main class="m-stage" id="stage">
+        <img class="m-bg" id="m-bg" alt="" />
+        <div class="m-canvas" id="m-canvas"></div>
+
+        <div class="m-top">
+          <div class="m-chips">
+            <span class="m-chip" id="chip-source">—</span>
+            <span class="m-chip" id="chip-conn"><span class="m-dot"></span><span id="conn-text">link</span></span>
+          </div>
+          <div class="m-viewtoggle" id="viewtoggle">
+            <button class="active" data-mode="live" type="button">Live</button>
+            <button data-mode="orbit" type="button">3D</button>
+          </div>
+        </div>
+
+        <div class="m-state state-safe" id="state-badge"><span id="state-text">—</span></div>
+
+        <div class="m-disc hidden" id="disc">
+          <div class="m-disc-title">NO CAMERA SIGNAL</div>
+          <div class="m-disc-sub" id="disc-sub">Waiting for the camera…</div>
+        </div>
+
+        <div class="m-clear" id="clearances">
+          <div class="m-clear-cell" data-key="front"><span>Front</span><b id="cl-front">—</b></div>
+          <div class="m-clear-cell" data-key="rear"><span>Rear</span><b id="cl-rear">—</b></div>
+          <div class="m-clear-cell" data-key="left"><span>Left</span><b id="cl-left">—</b></div>
+          <div class="m-clear-cell" data-key="right"><span>Right</span><b id="cl-right">—</b></div>
+          <div class="m-clear-cell" data-key="ceiling"><span>Roof</span><b id="cl-ceiling">—</b></div>
+        </div>
+      </main>
+
+      <div class="m-controls">
+        <button class="m-ctl" id="ctl-door" type="button">
+          <span class="m-ctl-title">Door</span>
+          <span class="m-ctl-sub" id="door-sub">—</span>
+        </button>
+        <button class="m-ctl" id="ctl-lights" type="button">
+          <span class="m-ctl-title">Lights</span>
+          <span class="m-ctl-sub" id="lights-sub">—</span>
+        </button>
+        <div class="m-meta">
+          <div class="m-meta-row"><span class="m-meta-k">Vehicle</span><span class="m-meta-v" id="veh-name">—</span></div>
+          <div class="m-meta-row"><span class="m-meta-k">Battery</span><span class="m-meta-v" id="bat-text">—</span></div>
+          <div class="m-meta-row"><span class="m-meta-k">Garage</span><span class="m-meta-v" id="env-text">—</span></div>
+        </div>
+      </div>
+
+      <nav class="m-tabs">
+        <a class="m-tab active" id="tab-drive" type="button">Drive</a>
+        <a class="m-tab" href="/terminal">Terminal</a>
+        <a class="m-tab" href="/?desktop=1">Desktop</a>
+      </nav>
+    </div>
+
+    <div class="m-toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/static/mobile.js"></script>
+  </body>
+</html>

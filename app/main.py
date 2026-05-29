@@ -1,7 +1,8 @@
 import asyncio
+import re
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -40,9 +41,32 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ─── Open endpoints (no auth) ───────────────────────────────────────────
 
+_MOBILE_UA = re.compile(r"Mobi|Android|iPhone|iPad|iPod|IEMobile|BlackBerry|Opera Mini", re.I)
+DESKTOP_HTML = STATIC_DIR / "index.html"
+MOBILE_HTML = STATIC_DIR / "mobile.html"
+
+
 @app.get("/")
-def index():
-    return FileResponse(STATIC_DIR / "index.html")
+def index(request: Request):
+    """Serve the mobile-first UI to phones and the desktop UI to PCs.
+    Override with ?desktop or ?mobile; /m and /d force a specific one."""
+    q = request.query_params
+    if "desktop" in q:
+        return FileResponse(DESKTOP_HTML)
+    if "mobile" in q:
+        return FileResponse(MOBILE_HTML)
+    is_mobile = bool(_MOBILE_UA.search(request.headers.get("user-agent", "")))
+    return FileResponse(MOBILE_HTML if is_mobile else DESKTOP_HTML)
+
+
+@app.get("/m")
+def index_mobile():
+    return FileResponse(MOBILE_HTML)
+
+
+@app.get("/d")
+def index_desktop():
+    return FileResponse(DESKTOP_HTML)
 
 
 @app.get("/terminal")
