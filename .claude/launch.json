@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [".claude/static-serve.cjs"],
+      "port": 4599
+    }
+  ]
+}

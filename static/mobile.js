@@ -138,7 +138,7 @@ function applyState(p) {
     const bits = [];
     if (b.voltage != null) bits.push(`${Number(b.voltage).toFixed(1)} V`);
     if (b.percent != null) bits.push(`${Math.round(b.percent)}%`);
-    els.batText.textContent = (bits.join(' · ') || '—') + (b.charging ? ' ⚡' : '');
+    els.batText.textContent = (bits.join(' · ') || '—') + (b.charging ? ' chg' : '');
   } else {
     els.batText.textContent = '—';
   }

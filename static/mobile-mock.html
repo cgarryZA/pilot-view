@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Pilot View — mobile mock</title>
+    <link rel="stylesheet" href="/static/mobile.css" />
+    <style>
+      /* Mock-only: stand in for the live three.js canvas with a faint wireframe hint. */
+      .m-canvas.mock {
+        background:
+          repeating-linear-gradient(0deg, rgba(111,211,255,.06) 0 1px, transparent 1px 28px),
+          repeating-linear-gradient(90deg, rgba(111,211,255,.06) 0 1px, transparent 1px 28px);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="m-app">
+      <main class="m-stage" id="stage">
+        <img class="m-bg visible" id="m-bg" src="/static/assets/synthetic/garage.jpg" alt="" />
+        <div class="m-canvas mock" id="m-canvas"></div>
+
+        <div class="m-top">
+          <div class="m-chips">
+            <span class="m-chip">SYNTHETIC</span>
+            <span class="m-chip ok"><span class="m-dot"></span><span>live</span></span>
+          </div>
+          <div class="m-viewtoggle" id="viewtoggle">
+            <button class="active" data-mode="live" type="button">Live</button>
+            <button data-mode="orbit" type="button">3D</button>
+          </div>
+        </div>
+
+        <div class="m-state state-warning" id="state-badge"><span>WARNING</span></div>
+
+        <div class="m-clear" id="clearances">
+          <div class="m-clear-cell warn" data-key="front"><span>Front</span><b>42 cm</b></div>
+          <div class="m-clear-cell" data-key="rear"><span>Rear</span><b>1.85 m</b></div>
+          <div class="m-clear-cell danger" data-key="left"><span>Left</span><b>15 cm</b></div>
+          <div class="m-clear-cell" data-key="right"><span>Right</span><b>60 cm</b></div>
+          <div class="m-clear-cell" data-key="ceiling"><span>Roof</span><b>1.14 m</b></div>
+        </div>
+      </main>
+
+      <div class="m-controls">
+        <div class="m-meta">
+          <div class="m-meta-row"><span class="m-meta-k">Vehicle</span><span class="m-meta-v">Lamborghini</span></div>
+          <div class="m-meta-row"><span class="m-meta-k">Battery</span><span class="m-meta-v">12.6V · 82%</span></div>
+          <div class="m-meta-row"><span class="m-meta-k">Garage</span><span class="m-meta-v">18°C · 54%</span></div>
+        </div>
+        <div class="m-actions">
+          <button class="m-ctl closed" id="ctl-door" type="button">
+            <span class="m-ctl-title">Door</span>
+            <span class="m-ctl-sub">Closed</span>
+          </button>
+          <button class="m-ctl" id="ctl-lights" type="button">
+            <span class="m-ctl-title">Lights</span>
+            <span class="m-ctl-sub">Off</span>
+          </button>
+        </div>
+      </div>
+
+      <nav class="m-tabs">
+        <a class="m-tab active">Drive</a>
+        <a class="m-tab">Terminal</a>
+        <a class="m-tab">Desktop</a>
+      </nav>
+    </div>
+  </body>
+</html>
