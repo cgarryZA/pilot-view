@@ -41,10 +41,14 @@
       <a class="btn" href="/">← App</a>
     </div>
     <div class="quick">
-      <small>Quick actions — for the access-point setup. After “AP confirm”, type your Pi password when asked.</small>
+      <small>Set up the access point: enter your country code &amp; a Wi-Fi password, tap “Set up &amp; activate AP”, then type your Pi password when the shell asks. The connection drops — rejoin “PilotView”.</small>
+      <input id="cc-input" type="text" value="GB" maxlength="2" size="2" aria-label="Country code"
+             style="width:48px;background:#0e1c2c;color:#cfe6ff;border:1px solid #1f4a66;border-radius:8px;padding:9px;font:inherit;font-size:12px;text-transform:uppercase;" />
+      <input id="psk-input" type="text" placeholder="Wi-Fi password (≥8 chars)" autocomplete="off" autocapitalize="off"
+             style="flex:1;min-width:140px;background:#0e1c2c;color:#cfe6ff;border:1px solid #1f4a66;border-radius:8px;padding:9px;font:inherit;font-size:12px;" />
+      <button id="finalize-btn" class="accent">Set up &amp; activate AP ✓</button>
       <button class="cmd" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh status">AP status</button>
-      <button class="cmd accent" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh confirm">AP confirm ✓</button>
-      <button class="cmd danger" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh off">AP off</button>
+      <button class="cmd danger" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh off">AP off (back to house Wi-Fi)</button>
       <button id="clear-btn">Clear</button>
     </div>
     <div id="screen"></div>
@@ -137,15 +141,28 @@
           connect();
         });
 
+        function runInShell(cmd) {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+          }
+          term.focus();
+        }
+
         // Quick-command buttons: type the command + Enter into the shell.
         document.querySelectorAll('button.cmd').forEach(function (b) {
-          b.addEventListener('click', function () {
-            var cmd = b.getAttribute('data-cmd');
-            if (ws && ws.readyState === 1) {
-              ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
-            }
-            term.focus();
-          });
+          b.addEventListener('click', function () { runInShell(b.getAttribute('data-cmd')); });
+        });
+
+        // Wrap a value in single quotes, safely escaping any embedded quotes,
+        // so it survives as one shell argument.
+        function shq(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'"; }
+
+        document.getElementById('finalize-btn').addEventListener('click', function () {
+          var cc = (document.getElementById('cc-input').value || 'GB').trim().toUpperCase();
+          var psk = document.getElementById('psk-input').value || '';
+          if (psk.length < 8) { alert('Wi-Fi password must be at least 8 characters.'); return; }
+          if (!/^[A-Z]{2}$/.test(cc)) { alert('Country code must be 2 letters, e.g. GB or ZA.'); return; }
+          runInShell('sudo bash ~/pilot-view/scripts/garage-ap.sh finalize ' + cc + ' ' + shq(psk));
         });
 
         connect();

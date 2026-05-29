@@ -125,13 +125,50 @@ cmd_on() {
   echo "     If it doesn't:  wait $((REVERT_SECS/60)) min (auto) or run  sudo bash $0 off"
 }
 
+cmd_finalize() {
+  # One-shot: install iw, set the regulatory domain (so AP channels are allowed),
+  # set the Wi-Fi password, then make the AP permanent and bring it up.
+  # Safe to run from the web terminal — it never restarts the pilot-view service.
+  need_root
+  local country="${1:-}" psk="${2:-}"
+  if [ -z "$country" ] || [ -z "$psk" ]; then
+    echo "usage: sudo bash $0 finalize <COUNTRY_CODE> <WIFI_PASSWORD>"
+    echo "  e.g. sudo bash $0 finalize GB 'Garage-Lambo-9173!'"
+    exit 1
+  fi
+  if [ "${#psk}" -lt 8 ]; then echo "ERROR: Wi-Fi password must be >= 8 characters"; exit 1; fi
+
+  echo "[1/3] regulatory domain -> $country (installs iw if needed; needs internet)…"
+  command -v iw >/dev/null 2>&1 || apt-get install -y iw >/dev/null 2>&1 || \
+    echo "  (warning: could not install 'iw' — AP may be limited without a regdomain)"
+  if command -v iw >/dev/null 2>&1; then iw reg set "$country" 2>/dev/null || true; fi
+  cat >/etc/systemd/system/wifi-regdom.service <<EOF
+[Unit]
+Description=Set Wi-Fi regulatory domain for Pilot View AP
+After=network-pre.target
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/iw reg set $country
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl enable wifi-regdom.service >/dev/null 2>&1 || true
+
+  echo "[2/3] setting the Wi-Fi password on '$AP_CON'…"
+  "$NMCLI" con modify "$AP_CON" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$psk"
+
+  echo "[3/3] making the AP permanent and activating it…"
+  cmd_confirm
+}
+
 cmd_confirm() {
   need_root
   systemctl stop "${REVERT_UNIT}.timer" >/dev/null 2>&1 || true
-  local house; house="$(house_con_any)"
-  [ -n "$house" ] && "$NMCLI" con modify "$house" connection.autoconnect no 2>/dev/null || true
+  # IMPORTANT: keep house Wi-Fi as an autoconnect FALLBACK (lower priority). If the
+  # AP can't start, NM falls back to the house network and the Pi stays reachable —
+  # no lockout. The AP wins whenever it's available (higher priority).
   "$NMCLI" con modify "$AP_CON" connection.autoconnect yes connection.autoconnect-priority 100 2>/dev/null || true
-  echo "Confirmed. The Pi will boot straight into the '$AP_CON' access point."
+  echo "AP set to autoconnect (priority). House Wi-Fi kept as a fallback."
   echo "Activating the AP now — this connection will drop; rejoin '$AP_CON' on your phone."
   # Detached so it completes even though bringing up the AP kills this session.
   systemd-run --unit=ap-up --collect "$NMCLI" con up "$AP_CON" >/dev/null 2>&1 \
@@ -161,10 +198,11 @@ cmd_status() {
 }
 
 case "${1:-}" in
-  install) shift; cmd_install "$@";;
-  on)      cmd_on;;
-  confirm) cmd_confirm;;
-  off)     cmd_off;;
-  status)  cmd_status;;
-  *) echo "usage: sudo bash $0 {install <CC> <SSID> <PSK> | on | confirm | off | status}";;
+  install)  shift; cmd_install "$@";;
+  finalize) shift; cmd_finalize "$@";;
+  on)       cmd_on;;
+  confirm)  cmd_confirm;;
+  off)      cmd_off;;
+  status)   cmd_status;;
+  *) echo "usage: sudo bash $0 {install <CC> <SSID> <PSK> | finalize <CC> <PSK> | on | confirm | off | status}";;
 esac
