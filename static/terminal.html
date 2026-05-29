@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#04070d" />
+    <title>Pilot View · Terminal</title>
+    <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #04070d; color: #cfe6ff;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+      body { display: flex; flex-direction: column; height: 100dvh; }
+      .bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+        padding: 8px 10px; background: #070c16; border-bottom: 1px solid #15324a; }
+      .brand { font-weight: 700; letter-spacing: .12em; font-size: 12px; color: #6fd3ff;
+        margin-right: auto; display: flex; align-items: center; gap: 8px; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: #ff6b6b; box-shadow: 0 0 8px currentColor; }
+      .dot.ok { background: #5ff0a0; }
+      .dot.wait { background: #ffc857; }
+      button, a.btn { appearance: none; -webkit-appearance: none; cursor: pointer;
+        background: #0e1c2c; color: #cfe6ff; border: 1px solid #1f4a66;
+        border-radius: 8px; padding: 9px 12px; font: inherit; font-size: 12px; text-decoration: none;
+        line-height: 1; }
+      button:active, a.btn:active { background: #14304a; }
+      button.accent { border-color: #2f7fae; color: #aee8ff; }
+      button.danger { border-color: #6a2330; color: #ffb3b3; }
+      .quick { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 10px;
+        background: #060a12; border-bottom: 1px solid #102234; }
+      .quick small { color: #6f8aa6; width: 100%; }
+      #screen { flex: 1 1 auto; min-height: 0; padding: 6px 4px 4px 8px; }
+      .xterm { height: 100%; }
+    </style>
+  </head>
+  <body>
+    <div class="bar">
+      <span class="brand"><span class="dot" id="status-dot"></span> PILOT&nbsp;VIEW · TERMINAL</span>
+      <button id="kbd-btn" title="Show keyboard">⌨ Keyboard</button>
+      <button id="reconnect-btn">↻ Reconnect</button>
+      <a class="btn" href="/">← App</a>
+    </div>
+    <div class="quick">
+      <small>Quick actions — for the access-point setup. After “AP confirm”, type your Pi password when asked.</small>
+      <button class="cmd" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh status">AP status</button>
+      <button class="cmd accent" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh confirm">AP confirm ✓</button>
+      <button class="cmd danger" data-cmd="sudo bash ~/pilot-view/scripts/garage-ap.sh off">AP off</button>
+      <button id="clear-btn">Clear</button>
+    </div>
+    <div id="screen"></div>
+
+    <script src="/static/vendor/xterm/xterm.js"></script>
+    <script src="/static/vendor/xterm/addon-fit.js"></script>
+    <script>
+      (function () {
+        var statusDot = document.getElementById('status-dot');
+        function setStatus(state) {
+          statusDot.className = 'dot' + (state === 'ok' ? ' ok' : state === 'wait' ? ' wait' : '');
+        }
+
+        var term = new Terminal({
+          cursorBlink: true,
+          fontFamily: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+          fontSize: 14,
+          scrollback: 4000,
+          theme: {
+            background: '#04070d', foreground: '#cfe6ff', cursor: '#6fd3ff',
+            selectionBackground: '#1f4a66',
+          },
+        });
+
+        var fit = null;
+        try { fit = new FitAddon.FitAddon(); term.loadAddon(fit); } catch (e) { fit = null; }
+        term.open(document.getElementById('screen'));
+
+        function doFit() {
+          try { if (fit) fit.fit(); } catch (e) {}
+        }
+        doFit();
+
+        var ws = null;
+        var reconnectTimer = null;
+
+        function wsUrl() {
+          var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+          return proto + '://' + location.host + '/api/terminal/ws';
+        }
+
+        function sendResize() {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+          }
+        }
+
+        function connect() {
+          setStatus('wait');
+          term.writeln('\x1b[90m… connecting to ' + wsUrl() + '\x1b[0m');
+          ws = new WebSocket(wsUrl());
+          ws.binaryType = 'arraybuffer';
+
+          ws.onopen = function () {
+            setStatus('ok');
+            doFit();
+            sendResize();
+            term.focus();
+          };
+          ws.onmessage = function (ev) {
+            if (typeof ev.data === 'string') {
+              term.write(ev.data);
+            } else {
+              term.write(new Uint8Array(ev.data));
+            }
+          };
+          ws.onclose = function (ev) {
+            setStatus('off');
+            term.writeln('\r\n\x1b[31m[disconnected' + (ev.code ? ' ' + ev.code : '') +
+              ']\x1b[0m  tap ↻ Reconnect');
+          };
+          ws.onerror = function () { try { ws.close(); } catch (e) {} };
+        }
+
+        term.onData(function (d) {
+          if (ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({ type: 'input', data: d }));
+          }
+        });
+
+        // Refit on viewport changes (rotation, keyboard show/hide).
+        var ro = new ResizeObserver(function () { doFit(); sendResize(); });
+        ro.observe(document.getElementById('screen'));
+        window.addEventListener('resize', function () { doFit(); sendResize(); });
+
+        document.getElementById('kbd-btn').addEventListener('click', function () { term.focus(); });
+        document.getElementById('clear-btn').addEventListener('click', function () { term.clear(); });
+        document.getElementById('reconnect-btn').addEventListener('click', function () {
+          try { if (ws) ws.close(); } catch (e) {}
+          connect();
+        });
+
+        // Quick-command buttons: type the command + Enter into the shell.
+        document.querySelectorAll('button.cmd').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var cmd = b.getAttribute('data-cmd');
+            if (ws && ws.readyState === 1) {
+              ws.send(JSON.stringify({ type: 'input', data: cmd + '\r' }));
+            }
+            term.focus();
+          });
+        });
+
+        connect();
+      })();
+    </script>
+  </body>
+</html>

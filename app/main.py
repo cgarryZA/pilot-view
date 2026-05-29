@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, automations, calibration, diagnostics, pose_solver
+from app import auth, automations, calibration, diagnostics, pose_solver, terminal
 from app.auth import require_auth, current_session
 from app.battery_monitor import battery_monitor
 from app.door import door
@@ -43,6 +43,14 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/")
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/terminal")
+def terminal_page():
+    # Self-contained admin shell (vendored xterm.js) — the only way to drive the
+    # Pi from a phone once it's its own access point. No auth wall here; the
+    # WebSocket below enforces the same gate as /ws.
+    return FileResponse(STATIC_DIR / "terminal.html")
 
 
 # ─── Protected endpoints — every API call requires a valid session ──────
@@ -291,3 +299,8 @@ async def ws(socket: WebSocket):
             await asyncio.sleep(1 / 15)
     except WebSocketDisconnect:
         return
+
+
+@app.websocket("/api/terminal/ws")
+async def terminal_ws(socket: WebSocket):
+    await terminal.terminal_endpoint(socket)
