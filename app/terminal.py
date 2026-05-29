@@ -60,7 +60,12 @@ async def terminal_endpoint(socket: WebSocket) -> None:
     # window does nothing but syscalls.
     child_env = dict(os.environ)
     child_env["TERM"] = "xterm-256color"
+    # The systemd unit pins PATH to the venv only; a real shell needs the system
+    # dirs or sudo/nmcli/systemctl/bash won't be found. Prepend the standard set.
+    system_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    child_env["PATH"] = system_path + ":" + child_env.get("PATH", "")
     home = os.path.expanduser("~")
+    child_env.setdefault("HOME", home)
 
     pid, master_fd = pty.fork()
     if pid == 0:
