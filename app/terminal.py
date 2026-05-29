@@ -17,13 +17,20 @@ feature off completely.
 """
 
 import asyncio
-import fcntl
 import json
 import os
-import pty
 import signal
 import struct
-import termios
+
+# pty/fcntl/termios are Unix-only. Guard them so the app can still run on a
+# Windows dev box (the web terminal simply disables itself there).
+try:
+    import fcntl
+    import pty
+    import termios
+    _PTY_AVAILABLE = True
+except ImportError:  # pragma: no cover — non-Unix dev machine
+    _PTY_AVAILABLE = False
 
 from fastapi import WebSocket, WebSocketDisconnect
 
@@ -33,6 +40,8 @@ SHELL = "/bin/bash"
 
 
 def terminal_enabled() -> bool:
+    if not _PTY_AVAILABLE:
+        return False
     return os.getenv("PILOT_VIEW_TERMINAL", "enabled").strip().lower() != "disabled"
 
 
