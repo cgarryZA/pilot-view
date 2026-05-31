@@ -299,40 +299,73 @@ def _floor_frame(P):
     return up, d_floor, e1, e2
 
 
-def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.06, min_pts=80):
+def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.06,
+                  min_pts=120, max_planes=6, min_plane=400):
     """Biggest object standing on the floor → its footprint bounding box.
-    Returns a dict with the box dims + arrays for a debug render, or None."""
+    Strips ALL structural planes (floor + walls) first, then clusters the
+    leftover. Returns a dict with box dims + arrays for a debug render, or None."""
     P = _deproject(buf, scale, intr, step, 0.2, 8.0)
     if P is None or len(P) < 500:
         return None
-    ff = _floor_frame(P)
-    if ff is None:
-        return None
-    up, d_floor, e1, e2 = ff
-    height = P @ up + d_floor          # metres above the floor
-    a = P @ e1                          # floor-plane coords
-    b = P @ e2
 
-    obj = (height > min_h) & (height < max_h)
-    out = {"a": a, "b": b, "obj": obj, "bbox": None}
-    if int(obj.sum()) < min_pts:
+    # Peel the dominant planes (floor + walls = structure).
+    planes = []
+    remaining = np.ones(len(P), dtype=bool)
+    for _ in range(max_planes):
+        idx = np.where(remaining)[0]
+        if idx.size < min_plane:
+            break
+        res = _fit_plane(P[idx])
+        if res is None:
+            break
+        n, d, local = res
+        if int(local.sum()) < min(min_plane, 300):
+            break
+        if d < 0:
+            n, d = -n, -d
+        planes.append((n.astype(np.float64), float(d), idx[local]))
+        remaining[idx[local]] = False
+    horiz = [(n, d, gi) for (n, d, gi) in planes if n[1] < -0.5]
+    if not horiz:
+        return None
+    acc = np.zeros(3)
+    for n, d, gi in horiz:
+        acc += n * len(gi)
+    up = acc / np.linalg.norm(acc)
+    d_floor = max(d for n, d, gi in horiz)
+    ref = np.array([1.0, 0, 0]) if abs(up[0]) < 0.9 else np.array([0, 1.0, 0])
+    e1 = np.cross(up, ref); e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+
+    a = P @ e1
+    b = P @ e2
+    height = P @ up + d_floor
+    out = {"a": a, "b": b, "bbox": None}
+
+    # Objects = leftover (non-plane) points standing on the floor.
+    obj_idx = np.where(remaining)[0]
+    h_obj = height[obj_idx]
+    keep = (h_obj > min_h) & (h_obj < max_h)
+    obj_idx = obj_idx[keep]
+    if obj_idx.size < min_pts:
         return out
-    labels = _voxel_cluster(P[obj], voxel=voxel)
+
+    labels = _voxel_cluster(P[obj_idx], voxel=voxel)
     uniq, counts = np.unique(labels, return_counts=True)
     valid = sorted(((int(c), int(u)) for u, c in zip(uniq, counts) if u != 0 and c >= min_pts), reverse=True)
     if not valid:
         return out
-    lab = valid[0][1]
-    sel = labels == lab
-    out["cluster_global"] = np.where(obj)[0][sel]
-    ca, cb, ch = a[obj][sel], b[obj][sel], height[obj][sel]
+    sel = labels == valid[0][1]
+    g = obj_idx[sel]
+    out["cluster_global"] = g
+    ca, cb, ch = a[g], b[g], height[g]
     out["bbox"] = {
         "a_min": float(ca.min()), "a_max": float(ca.max()),
         "b_min": float(cb.min()), "b_max": float(cb.max()),
         "length": float(ca.max() - ca.min()),
         "width": float(cb.max() - cb.min()),
         "height": float(ch.max()),
-        "points": int(sel.sum()),
+        "points": int(g.size),
     }
     return out
 
