@@ -216,6 +216,29 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
     return result
 
 
+@app.post("/api/calibration/auto_pose")
+def auto_pose(_=Depends(require_auth)):
+    """Auto-calibrate the camera pose straight from depth — no manual pinning.
+    Fits the floor (height + tilt) and the facing wall (yaw + distance)."""
+    d = _depth_frame()
+    if not d:
+        raise HTTPException(400, "no depth frame yet — is the camera streaming?")
+    cam = source_manager.state().get("camera", {})
+    fov = cam.get("fov_deg") or 55.0
+    result = depth.auto_pose_from_depth(*d, fov_deg=float(fov))
+    if result is None:
+        raise HTTPException(400, "could not fit a floor + facing wall from the depth cloud")
+    calibration.save({
+        "live_view": {
+            "camera_position": result["camera_position"],
+            "camera_look_at": result["camera_look_at"],
+            "camera_up": result["camera_up"],
+            "camera_fov_deg": result["camera_fov_deg"],
+        },
+    })
+    return result
+
+
 @app.get("/api/door")
 def get_door(_=Depends(require_auth)):
     return door.status_dict()

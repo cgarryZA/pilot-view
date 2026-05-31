@@ -144,6 +144,110 @@ def segmented_bytes(buf, scale, intr, step=6, min_range=0.15, max_range=6.0,
     return _to_threejs(P).astype(np.float32).tobytes() + colors.astype(np.float32).tobytes()
 
 
+def _fit_plane(P, iters=120, thresh=0.03):
+    """Dominant plane in P via RANSAC + least-squares refit.
+    Returns (n_unit, d, inlier_mask) with the convention n·X + d = 0, or None."""
+    n_pts = len(P)
+    if n_pts < 80:
+        return None
+    rng = np.random.default_rng(0)
+    best = None
+    for _ in range(iters):
+        i, j, k = rng.integers(0, n_pts, 3)
+        a, b, c = P[i], P[j], P[k]
+        nrm = np.cross(b - a, c - a)
+        L = np.linalg.norm(nrm)
+        if L < 1e-6:
+            continue
+        nrm = nrm / L
+        d = -float(nrm.dot(a))
+        cnt = int((np.abs(P.dot(nrm) + d) < thresh).sum())
+        if best is None or cnt > best[0]:
+            best = (cnt, nrm, d)
+    if best is None:
+        return None
+    # Refit on inliers (PCA → normal is the smallest-variance direction).
+    nrm, d = best[1], best[2]
+    mask = np.abs(P.dot(nrm) + d) < thresh
+    Q = P[mask]
+    if len(Q) < 50:
+        return nrm, d, mask
+    centroid = Q.mean(axis=0)
+    _, _, vt = np.linalg.svd(Q - centroid, full_matrices=False)
+    nrm = vt[2] / np.linalg.norm(vt[2])
+    d = -float(nrm.dot(centroid))
+    mask = np.abs(P.dot(nrm) + d) < thresh
+    return nrm, d, mask
+
+
+def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
+    """Compute the camera pose in garage frame directly from depth: fit the floor
+    (height + tilt) and the wall the camera faces (yaw + distance). Returns a
+    live_view dict (camera_position/look_at/up/fov) + diagnostics, or None."""
+    P = _deproject(buf, scale, intr, step, 0.2, 8.0)
+    if P is None or len(P) < 500:
+        return None
+
+    # Peel several planes; orient each normal toward the camera origin (d > 0 so
+    # the signed distance from the origin is +d).
+    planes = []
+    remaining = np.ones(len(P), dtype=bool)
+    for _ in range(5):
+        idx = np.where(remaining)[0]
+        if idx.size < 400:
+            break
+        res = _fit_plane(P[idx])
+        if res is None:
+            break
+        nrm, d, local = res
+        if int(local.sum()) < 300:
+            break
+        if d < 0:
+            nrm, d = -nrm, -d
+        gidx = idx[local]
+        planes.append({"n": nrm.astype(np.float64), "d": float(d), "count": int(local.sum()), "idx": gidx})
+        remaining[gidx] = False
+    if len(planes) < 2:
+        return None
+
+    # Floor: normal points most "up" (camera +Y is down, so up ≈ -Y), large.
+    floor = max(planes, key=lambda p: (-p["n"][1]) * p["count"])
+    others = [p for p in planes if p is not floor]
+    # Facing wall: vertical (small |n_y|), large, and faced by the camera.
+    wall = max(others, key=lambda p: abs(p["n"][2]) * p["count"] * (1.0 if abs(p["n"][1]) < 0.5 else 0.15))
+
+    up_cam = floor["n"] / np.linalg.norm(floor["n"])      # points up toward camera
+    h = floor["d"]                                         # camera height above floor (m)
+    # Garage +Z (back wall → into room) in camera frame ≈ wall normal, made ⊥ to up.
+    zc = wall["n"] - up_cam * float(wall["n"].dot(up_cam))
+    zc = zc / np.linalg.norm(zc)
+    xc = np.cross(up_cam, zc)
+    xc = xc / np.linalg.norm(xc)
+    R_cg = np.stack([xc, up_cam, zc], axis=1)   # columns = garage axes in cam frame
+    R_gc = R_cg.T                               # camera vector → garage vector
+    d_wall = wall["d"]
+
+    # Centre laterally so the visible wall spans x=0.
+    x0 = -float((P[wall["idx"]] @ xc).mean())
+    pos = np.array([x0, h, d_wall], dtype=np.float64)
+    forward = R_gc @ np.array([0.0, 0.0, 1.0])   # camera looks along +Z_cam
+    up_g = R_gc @ np.array([0.0, -1.0, 0.0])     # camera up is -Y_cam
+    look = pos + forward
+
+    d3 = lambda v: {"x": float(v[0]), "y": float(v[1]), "z": float(v[2])}
+    return {
+        "camera_position": d3(pos),
+        "camera_look_at": d3(look),
+        "camera_up": d3(up_g),
+        "camera_fov_deg": float(fov_deg),
+        "floor_height": round(h, 3),
+        "wall_distance": round(d_wall, 3),
+        "floor_points": floor["count"],
+        "wall_points": wall["count"],
+        "planes_found": len(planes),
+    }
+
+
 class DepthCamera:
     def __init__(self) -> None:
         self._lock = threading.Lock()
