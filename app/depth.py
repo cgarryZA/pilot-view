@@ -299,8 +299,8 @@ def _floor_frame(P):
     return up, d_floor, e1, e2
 
 
-def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.06,
-                  min_pts=120, max_planes=6, min_plane=400):
+def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.05,
+                  min_pts=120, max_planes=10, min_plane=350, plane_thresh=0.05):
     """Biggest object standing on the floor → its footprint bounding box.
     Strips ALL structural planes (floor + walls) first, then clusters the
     leftover. Returns a dict with box dims + arrays for a debug render, or None."""
@@ -315,7 +315,7 @@ def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.06,
         idx = np.where(remaining)[0]
         if idx.size < min_plane:
             break
-        res = _fit_plane(P[idx])
+        res = _fit_plane(P[idx], thresh=plane_thresh)
         if res is None:
             break
         n, d, local = res
