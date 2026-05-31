@@ -210,20 +210,24 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
     if len(planes) < 2:
         return None
 
-    # Floor: a roughly-horizontal, up-pointing plane (camera +Y is down, so the
-    # floor normal has n_y < 0). Prefer the LOWEST such surface (largest height
-    # d) so furniture/couch seats don't get mistaken for the floor.
+    # Up direction = consensus of all roughly-horizontal, up-pointing surfaces
+    # (floor, desk, couch are all level, so their normals agree — robust to one
+    # tilted clutter plane). Height = the LOWEST such surface = the real floor.
     horiz = [p for p in planes if p["n"][1] < -0.5]
     if horiz:
+        acc = np.zeros(3)
+        for p in horiz:
+            acc += p["n"] * p["count"]
+        up_cam = acc / np.linalg.norm(acc)
+        h = max(p["d"] for p in horiz)
         floor = max(horiz, key=lambda p: p["d"])
     else:
         floor = max(planes, key=lambda p: (-p["n"][1]) * p["count"])
+        up_cam = floor["n"] / np.linalg.norm(floor["n"])
+        h = floor["d"]
     others = [p for p in planes if p is not floor]
     # Facing wall: vertical (small |n_y|), large, and faced by the camera.
     wall = max(others, key=lambda p: abs(p["n"][2]) * p["count"] * (1.0 if abs(p["n"][1]) < 0.5 else 0.15))
-
-    up_cam = floor["n"] / np.linalg.norm(floor["n"])      # points up toward camera
-    h = floor["d"]                                         # camera height above floor (m)
     # Garage +Z (back wall → into room) in camera frame ≈ wall normal, made ⊥ to up.
     zc = wall["n"] - up_cam * float(wall["n"].dot(up_cam))
     zc = zc / np.linalg.norm(zc)
