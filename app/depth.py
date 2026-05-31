@@ -210,8 +210,14 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
     if len(planes) < 2:
         return None
 
-    # Floor: normal points most "up" (camera +Y is down, so up ≈ -Y), large.
-    floor = max(planes, key=lambda p: (-p["n"][1]) * p["count"])
+    # Floor: a roughly-horizontal, up-pointing plane (camera +Y is down, so the
+    # floor normal has n_y < 0). Prefer the LOWEST such surface (largest height
+    # d) so furniture/couch seats don't get mistaken for the floor.
+    horiz = [p for p in planes if p["n"][1] < -0.5]
+    if horiz:
+        floor = max(horiz, key=lambda p: p["d"])
+    else:
+        floor = max(planes, key=lambda p: (-p["n"][1]) * p["count"])
     others = [p for p in planes if p is not floor]
     # Facing wall: vertical (small |n_y|), large, and faced by the camera.
     wall = max(others, key=lambda p: abs(p["n"][2]) * p["count"] * (1.0 if abs(p["n"][1]) < 0.5 else 0.15))
