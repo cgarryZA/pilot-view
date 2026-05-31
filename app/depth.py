@@ -484,18 +484,25 @@ def detect_car_garage(buf, scale, intr, pose, garage, expect=None, step=4,
     Q, bb = chosen
     cx = float((Q[:, 0].min() + Q[:, 0].max()) / 2)
     cz = float((Q[:, 2].min() + Q[:, 2].max()) / 2)
-    hl, hw = bb["length"] / 2, bb["width"] / 2
+    # Use the KNOWN vehicle extent (depth only sees partial faces) so the box and
+    # the GLB mesh are full-size and consistent; position comes from detection.
+    if expect is not None:
+        ext = {"length": float(expect[0]), "width": float(expect[1]), "height": float(expect[2])}
+    else:
+        ext = {"length": bb["length"], "width": bb["width"], "height": bb["height"]}
+    hl, hw = ext["length"] / 2, ext["width"] / 2
     car = {
-        "position": {"x": cx, "y": bb["height"] / 2, "z": cz},
+        "position": {"x": cx, "y": ext["height"] / 2, "z": cz},
         "yaw": 0.0,
-        "extent": {"length": bb["length"], "width": bb["width"], "height": bb["height"]},
+        "extent": ext,
+        "measured": {"length": bb["length"], "width": bb["width"], "height": bb["height"]},
     }
     clearances = {
         "front": Ln - (cz + hl),
         "rear": cz - hl,
         "left": W / 2 + cx - hw,
         "right": W / 2 - cx - hw,
-        "ceiling": H - bb["height"],
+        "ceiling": H - ext["height"],
     }
     return {"car": car, "clearances": clearances}
 

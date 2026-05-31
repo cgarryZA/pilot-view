@@ -7,6 +7,7 @@ const els = {
   canvas: $('m-canvas'),
   chipSource: $('chip-source'),
   chipVehicle: $('chip-vehicle'),
+  tabAlign: $('tab-align'),
   srcName: $('src-name'),
   connDot: $('conn-dot'),
   viewToggle: $('viewtoggle'),
@@ -97,6 +98,22 @@ els.chipVehicle.addEventListener('click', async () => {
   if (vehicleDriver !== 'synthetic') return;
   try { await fetch('/api/vehicles/cycle', { method: 'POST' }); }
   catch (err) { /* ignore */ }
+});
+
+// ── auto-align the camera pose from depth (calibrate in the garage) ──
+els.tabAlign.addEventListener('click', async () => {
+  showToast('Reading depth…');
+  try {
+    const res = await fetch('/api/calibration/auto_pose', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.detail || 'Align failed', 'danger'); return; }
+    showToast(`Aligned · floor ${data.floor_height} m · wall ${data.wall_distance} m`, 'info', 2600);
+    // Pull the saved pose into the scene immediately.
+    const cal = await fetch('/api/calibration', { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null);
+    if (cal && scene && scene.applyCalibration) scene.applyCalibration(cal);
+  } catch (err) {
+    showToast('Align error', 'danger');
+  }
 });
 
 // ── state application ──
