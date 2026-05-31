@@ -265,6 +265,114 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
     }
 
 
+def _floor_frame(P):
+    """Find the floor and a gravity-aligned basis. Returns (up, d_floor, e1, e2)
+    where up is the floor normal (toward camera), height(X)=up·X+d_floor, and
+    e1,e2 span the floor plane. None if no floor found."""
+    planes = []
+    remaining = np.ones(len(P), dtype=bool)
+    for _ in range(5):
+        idx = np.where(remaining)[0]
+        if idx.size < 400:
+            break
+        res = _fit_plane(P[idx])
+        if res is None:
+            break
+        n, d, local = res
+        if int(local.sum()) < 300:
+            break
+        if d < 0:
+            n, d = -n, -d
+        planes.append((n.astype(np.float64), float(d), idx[local]))
+        remaining[idx[local]] = False
+    horiz = [(n, d, gi) for (n, d, gi) in planes if n[1] < -0.5]
+    if not horiz:
+        return None
+    acc = np.zeros(3)
+    for n, d, gi in horiz:
+        acc += n * len(gi)
+    up = acc / np.linalg.norm(acc)
+    d_floor = max(d for n, d, gi in horiz)
+    ref = np.array([1.0, 0, 0]) if abs(up[0]) < 0.9 else np.array([0, 1.0, 0])
+    e1 = np.cross(up, ref); e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+    return up, d_floor, e1, e2
+
+
+def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.06, min_pts=80):
+    """Biggest object standing on the floor → its footprint bounding box.
+    Returns a dict with the box dims + arrays for a debug render, or None."""
+    P = _deproject(buf, scale, intr, step, 0.2, 8.0)
+    if P is None or len(P) < 500:
+        return None
+    ff = _floor_frame(P)
+    if ff is None:
+        return None
+    up, d_floor, e1, e2 = ff
+    height = P @ up + d_floor          # metres above the floor
+    a = P @ e1                          # floor-plane coords
+    b = P @ e2
+
+    obj = (height > min_h) & (height < max_h)
+    out = {"a": a, "b": b, "obj": obj, "bbox": None}
+    if int(obj.sum()) < min_pts:
+        return out
+    labels = _voxel_cluster(P[obj], voxel=voxel)
+    uniq, counts = np.unique(labels, return_counts=True)
+    valid = sorted(((int(c), int(u)) for u, c in zip(uniq, counts) if u != 0 and c >= min_pts), reverse=True)
+    if not valid:
+        return out
+    lab = valid[0][1]
+    sel = labels == lab
+    out["cluster_global"] = np.where(obj)[0][sel]
+    ca, cb, ch = a[obj][sel], b[obj][sel], height[obj][sel]
+    out["bbox"] = {
+        "a_min": float(ca.min()), "a_max": float(ca.max()),
+        "b_min": float(cb.min()), "b_max": float(cb.max()),
+        "length": float(ca.max() - ca.min()),
+        "width": float(cb.max() - cb.min()),
+        "height": float(ch.max()),
+        "points": int(sel.sum()),
+    }
+    return out
+
+
+def detect_debug_png(buf, scale, intr):
+    """Top-down (bird's-eye) PNG: all points grey, the detected object cyan, its
+    bounding box in green, with dimensions. Empty bytes if nothing/no camera."""
+    import cv2
+    res = detect_object(buf, scale, intr)
+    if res is None:
+        return b""
+    a, b = res["a"], res["b"]
+    amin, amax, bmin, bmax = float(a.min()), float(a.max()), float(b.min()), float(b.max())
+    W = H = 640
+    pad = 30
+    s = min((W - 2 * pad) / (amax - amin + 1e-6), (H - 2 * pad) / (bmax - bmin + 1e-6))
+    img = np.zeros((H, W, 3), dtype=np.uint8)
+
+    def px(av, bv):
+        return (np.clip((pad + (av - amin) * s), 0, W - 1).astype(np.int32),
+                np.clip((pad + (bv - bmin) * s), 0, H - 1).astype(np.int32))
+
+    xs, ys = px(a, b)
+    img[ys, xs] = (70, 70, 80)
+    if res.get("cluster_global") is not None:
+        gi = res["cluster_global"]
+        cx, cy = px(a[gi], b[gi])
+        img[cy, cx] = (255, 210, 90)
+    bb = res.get("bbox")
+    if bb:
+        (x0, y0) = (int(pad + (bb["a_min"] - amin) * s), int(pad + (bb["b_min"] - bmin) * s))
+        (x1, y1) = (int(pad + (bb["a_max"] - amin) * s), int(pad + (bb["b_max"] - bmin) * s))
+        cv2.rectangle(img, (x0, y0), (x1, y1), (90, 255, 120), 2)
+        label = f"{bb['length']:.2f} x {bb['width']:.2f} m, h {bb['height']:.2f}"
+        cv2.putText(img, label, (10, H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 255, 120), 1, cv2.LINE_AA)
+    cv2.putText(img, "top-down (bird's-eye)", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 160, 180), 1, cv2.LINE_AA)
+    ok, enc = cv2.imencode(".png", img)
+    return enc.tobytes() if ok else b""
+
+
 class DepthCamera:
     def __init__(self) -> None:
         self._lock = threading.Lock()

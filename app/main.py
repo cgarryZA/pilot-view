@@ -95,6 +95,13 @@ def depth_segments():
     )
 
 
+@app.get("/api/depth/detect.png")
+def depth_detect_png():
+    d = _depth_frame()
+    data = depth.detect_debug_png(*d) if d else b""
+    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/depth/status")
 def depth_status():
     src = source_manager.get_depth()
