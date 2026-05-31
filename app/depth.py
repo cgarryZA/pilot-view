@@ -299,8 +299,24 @@ def _floor_frame(P):
     return up, d_floor, e1, e2
 
 
-def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.05,
-                  min_pts=120, max_planes=10, min_plane=350, plane_thresh=0.05):
+def _matches_vehicle(bb, expect):
+    """Is this footprint roughly the expected vehicle size? Generous, because
+    depth only sees the visible faces (partial footprint) — but a car is LONG,
+    so the long-axis gate is what rejects people/boxes/clutter."""
+    L, W, H = expect
+    foot_long = max(bb["length"], bb["width"])
+    foot_short = min(bb["length"], bb["width"])
+    if not (0.55 * L <= foot_long <= 1.5 * L):
+        return False
+    if not (0.30 * W <= foot_short <= 1.9 * W):
+        return False
+    if bb["height"] > 1.7 * H + 0.4:
+        return False
+    return True
+
+
+def detect_object(buf, scale, intr, expect=None, step=4, min_h=0.08, max_h=2.5,
+                  voxel=0.05, min_pts=120, max_planes=10, min_plane=350, plane_thresh=0.05):
     """Biggest object standing on the floor → its footprint bounding box.
     Strips ALL structural planes (floor + walls) first, then clusters the
     leftover. Returns a dict with box dims + arrays for a debug render, or None."""
@@ -355,26 +371,51 @@ def detect_object(buf, scale, intr, step=4, min_h=0.08, max_h=2.5, voxel=0.05,
     valid = sorted(((int(c), int(u)) for u, c in zip(uniq, counts) if u != 0 and c >= min_pts), reverse=True)
     if not valid:
         return out
-    sel = labels == valid[0][1]
-    g = obj_idx[sel]
+
+    def make_bbox(lab):
+        g = obj_idx[labels == lab]
+        ca, cb, ch = a[g], b[g], height[g]
+        return g, {
+            "a_min": float(ca.min()), "a_max": float(ca.max()),
+            "b_min": float(cb.min()), "b_max": float(cb.max()),
+            "length": float(ca.max() - ca.min()),
+            "width": float(cb.max() - cb.min()),
+            "height": float(ch.max()),
+            "points": int(g.size),
+        }
+
+    # Pick the largest cluster that matches the expected vehicle size. If none
+    # match (or no expectation given), fall back to the largest object so the
+    # debug view still shows what was found, flagged as not-a-car.
+    chosen = None
+    fallback = None
+    for _cnt, lab in valid[:8]:
+        g, bb = make_bbox(lab)
+        if fallback is None:
+            fallback = (g, bb)
+        if expect is not None and _matches_vehicle(bb, expect):
+            chosen = (g, bb, True)
+            break
+    if chosen is None:
+        g, bb = fallback
+        chosen = (g, bb, False if expect is not None else None)
+
+    g, bb, is_veh = chosen
+    bb["is_vehicle"] = is_veh
+    bb["expected"] = ({"length": expect[0], "width": expect[1], "height": expect[2]}
+                      if expect is not None else None)
     out["cluster_global"] = g
-    ca, cb, ch = a[g], b[g], height[g]
-    out["bbox"] = {
-        "a_min": float(ca.min()), "a_max": float(ca.max()),
-        "b_min": float(cb.min()), "b_max": float(cb.max()),
-        "length": float(ca.max() - ca.min()),
-        "width": float(cb.max() - cb.min()),
-        "height": float(ch.max()),
-        "points": int(g.size),
-    }
+    out["is_vehicle"] = is_veh
+    out["bbox"] = bb
     return out
 
 
-def detect_debug_png(buf, scale, intr):
+def detect_debug_png(buf, scale, intr, expect=None):
     """Top-down (bird's-eye) PNG: all points grey, the detected object cyan, its
-    bounding box in green, with dimensions. Empty bytes if nothing/no camera."""
+    bounding box green if it matches the expected vehicle size, amber if not.
+    Empty bytes if nothing/no camera."""
     import cv2
-    res = detect_object(buf, scale, intr)
+    res = detect_object(buf, scale, intr, expect=expect)
     if res is None:
         return b""
     a, b = res["a"], res["b"]
@@ -396,11 +437,20 @@ def detect_debug_png(buf, scale, intr):
         img[cy, cx] = (255, 210, 90)
     bb = res.get("bbox")
     if bb:
+        is_veh = bb.get("is_vehicle")
+        color = (120, 255, 90) if is_veh else ((0, 165, 255) if is_veh is False else (255, 210, 90))
         (x0, y0) = (int(pad + (bb["a_min"] - amin) * s), int(pad + (bb["b_min"] - bmin) * s))
         (x1, y1) = (int(pad + (bb["a_max"] - amin) * s), int(pad + (bb["b_max"] - bmin) * s))
-        cv2.rectangle(img, (x0, y0), (x1, y1), (90, 255, 120), 2)
-        label = f"{bb['length']:.2f} x {bb['width']:.2f} m, h {bb['height']:.2f}"
-        cv2.putText(img, label, (10, H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 255, 120), 1, cv2.LINE_AA)
+        cv2.rectangle(img, (x0, y0), (x1, y1), color, 2)
+        dims = f"{bb['length']:.2f} x {bb['width']:.2f} m  h {bb['height']:.2f}"
+        if is_veh is True:
+            label = "CAR  " + dims
+        elif is_veh is False:
+            ex = bb.get("expected") or {}
+            label = f"not car-sized: {dims}  (need ~{ex.get('length', 0):.1f}x{ex.get('width', 0):.1f})"
+        else:
+            label = dims
+        cv2.putText(img, label, (10, H - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
     cv2.putText(img, "top-down (bird's-eye)", (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 160, 180), 1, cv2.LINE_AA)
     ok, enc = cv2.imencode(".png", img)
     return enc.tobytes() if ok else b""

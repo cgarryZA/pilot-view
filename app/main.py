@@ -95,10 +95,19 @@ def depth_segments():
     )
 
 
+def _expected_extent():
+    """(length, width, height) of the active vehicle, or None."""
+    active = vehicles.state_dict().get("active") or {}
+    ext = active.get("extent")
+    if ext and all(k in ext for k in ("length", "width", "height")):
+        return (float(ext["length"]), float(ext["width"]), float(ext["height"]))
+    return None
+
+
 @app.get("/api/depth/detect.png")
 def depth_detect_png():
     d = _depth_frame()
-    data = depth.detect_debug_png(*d) if d else b""
+    data = depth.detect_debug_png(*d, expect=_expected_extent()) if d else b""
     return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
