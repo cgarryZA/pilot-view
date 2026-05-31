@@ -48,8 +48,11 @@ class OrbbecSource(CameraSource):
         self._latest_depth = None               # HxW uint16
         self._depth_scale: float = 1.0          # mm per depth unit
         self._depth_intr = None                 # (fx, fy, cx, cy)
+        self._car = None                        # detected car (garage frame) or None
+        self._clearances: dict = {}             # per-side clearances (m)
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._det_thread: Optional[threading.Thread] = None
 
         try:
             import pyorbbecsdk  # type: ignore
@@ -67,6 +70,40 @@ class OrbbecSource(CameraSource):
         self._running = True
         self._thread = threading.Thread(target=self._capture_loop, daemon=True)
         self._thread.start()
+        # Car detection runs in its own (throttled) thread so the heavy
+        # RANSAC/clustering never stalls the frame grab.
+        self._det_thread = threading.Thread(target=self._detection_loop, daemon=True)
+        self._det_thread.start()
+
+    # ── car detection thread ────────────────────────────────────────────
+
+    def _detection_loop(self) -> None:
+        from app import calibration, depth as depth_mod
+        while self._running:
+            time.sleep(0.35)
+            d = self.get_depth()
+            if d is None:
+                continue
+            try:
+                cal = calibration.load()
+                pose = cal.get("live_view")
+                garage = cal.get("garage", {})
+                if not pose:
+                    continue
+                expect = None
+                try:
+                    from app.vehicles import vehicles
+                    ext = (vehicles.state_dict().get("active") or {}).get("extent")
+                    if ext and all(k in ext for k in ("length", "width", "height")):
+                        expect = (float(ext["length"]), float(ext["width"]), float(ext["height"]))
+                except Exception:
+                    pass
+                res = depth_mod.detect_car_garage(*d, pose=pose, garage=garage, expect=expect)
+                with self._lock:
+                    self._car = res.get("car")
+                    self._clearances = res.get("clearances") or {}
+            except Exception as exc:
+                print(f"[orbbec] detection error: {exc}")
 
     # ── capture thread ──────────────────────────────────────────────────
 
@@ -244,6 +281,8 @@ class OrbbecSource(CameraSource):
         self._running = False
         if self._thread is not None:
             self._thread.join(timeout=3)
+        if self._det_thread is not None:
+            self._det_thread.join(timeout=2)
 
     def _streaming(self) -> bool:
         with self._lock:
@@ -263,13 +302,23 @@ class OrbbecSource(CameraSource):
             error = self._last_error
             last_attempt = self._last_attempt
             fov_deg = self._fov_deg
+            car = self._car
+            clearances = dict(self._clearances)
+
+        warn = thresholds.get("warn", 0.5)
+        danger = thresholds.get("danger", 0.2)
+        if clearances:
+            smallest = min(clearances.values())
+            state_label = "danger" if smallest < danger else ("warning" if smallest < warn else "safe")
+        else:
+            state_label = "safe"
 
         geometry = None
         live_url = None
         if streaming:
             live_url = "/api/camera/stream"
-            # Emit garage geometry from calibration so the wireframe walls + door
-            # overlay the live feed. Car stays null until depth detection lands.
+            # Garage wireframe from calibration; car + clearances from the depth
+            # detection thread (null until a car-sized object is found).
             geometry = {
                 "garage": {
                     "width": garage.get("width", 3.0),
@@ -278,13 +327,10 @@ class OrbbecSource(CameraSource):
                     "door_opening_width": garage.get("door_opening_width", 2.4),
                     "door_opening_height": garage.get("door_opening_height", 2.0),
                 },
-                "car": None,
-                "clearances": {},
-                "thresholds": {
-                    "warn": thresholds.get("warn", 0.5),
-                    "danger": thresholds.get("danger", 0.2),
-                },
-                "state": "safe",
+                "car": car,
+                "clearances": clearances,
+                "thresholds": {"warn": warn, "danger": danger},
+                "state": state_label,
             }
 
         connected = info is not None

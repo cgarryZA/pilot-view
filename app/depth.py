@@ -410,6 +410,96 @@ def detect_object(buf, scale, intr, expect=None, step=4, min_h=0.08, max_h=2.5,
     return out
 
 
+def _cam_to_garage_R(pose):
+    """Rotation mapping OpenCV camera vectors → garage frame, from a saved
+    live_view pose (camera_position/look_at/up). Returns (R_gc, C) or None."""
+    try:
+        C = np.array([pose["camera_position"]["x"], pose["camera_position"]["y"], pose["camera_position"]["z"]], float)
+        L = np.array([pose["camera_look_at"]["x"], pose["camera_look_at"]["y"], pose["camera_look_at"]["z"]], float)
+        U = np.array([pose["camera_up"]["x"], pose["camera_up"]["y"], pose["camera_up"]["z"]], float)
+    except (KeyError, TypeError):
+        return None
+    f = L - C
+    nf = np.linalg.norm(f)
+    if nf < 1e-6:
+        return None
+    f = f / nf
+    col1 = -U
+    col1 = col1 - f * float(col1.dot(f))           # orthogonalise against forward
+    n1 = np.linalg.norm(col1)
+    if n1 < 1e-6:
+        return None
+    col1 /= n1
+    col0 = np.cross(col1, f)
+    col0 /= np.linalg.norm(col0)
+    R_gc = np.stack([col0, col1, f], axis=1)        # columns = R_gc@(1,0,0),(0,1,0),(0,0,1)
+    return R_gc, C
+
+
+def detect_car_garage(buf, scale, intr, pose, garage, expect=None, step=4,
+                      voxel=0.08, min_pts=150):
+    """Detect the car in GARAGE coordinates. Transforms depth via the calibrated
+    pose, keeps points inside the parking volume (floor + walls are the known
+    bounds), clusters, and accepts the car-sized cluster. Returns
+    {"car": {...}|None, "clearances": {...}}."""
+    P = _deproject(buf, scale, intr, step, 0.2, 12.0)
+    if P is None:
+        return {"car": None, "clearances": {}}
+    tr = _cam_to_garage_R(pose)
+    if tr is None:
+        return {"car": None, "clearances": {}}
+    R_gc, C = tr
+    Pg = P @ R_gc.T + C
+
+    W = float(garage.get("width", 3.0))
+    Ln = float(garage.get("length", 5.8))
+    H = float(garage.get("height", 2.3))
+    x, y, z = Pg[:, 0], Pg[:, 1], Pg[:, 2]
+    m = 0.25
+    inside = (y > 0.12) & (y < H + 0.2) & (np.abs(x) < W / 2 + m) & (z > -m) & (z < Ln + m)
+    Pin = Pg[inside]
+    if len(Pin) < min_pts:
+        return {"car": None, "clearances": {}}
+
+    labels = _voxel_cluster(Pin, voxel=voxel)
+    uniq, counts = np.unique(labels, return_counts=True)
+    valid = sorted(((int(c), int(u)) for u, c in zip(uniq, counts) if u != 0 and c >= min_pts), reverse=True)
+    if not valid:
+        return {"car": None, "clearances": {}}
+
+    chosen = None
+    for _cnt, lab in valid[:8]:
+        Q = Pin[labels == lab]
+        bb = {
+            "length": float(np.ptp(Q[:, 2])),   # along the bay (z)
+            "width": float(np.ptp(Q[:, 0])),    # across (x)
+            "height": float(Q[:, 1].max()),     # up from the floor
+        }
+        if expect is None or _matches_vehicle(bb, expect):
+            chosen = (Q, bb)
+            break
+    if chosen is None:
+        return {"car": None, "clearances": {}}
+
+    Q, bb = chosen
+    cx = float((Q[:, 0].min() + Q[:, 0].max()) / 2)
+    cz = float((Q[:, 2].min() + Q[:, 2].max()) / 2)
+    hl, hw = bb["length"] / 2, bb["width"] / 2
+    car = {
+        "position": {"x": cx, "y": bb["height"] / 2, "z": cz},
+        "yaw": 0.0,
+        "extent": {"length": bb["length"], "width": bb["width"], "height": bb["height"]},
+    }
+    clearances = {
+        "front": Ln - (cz + hl),
+        "rear": cz - hl,
+        "left": W / 2 + cx - hw,
+        "right": W / 2 - cx - hw,
+        "ceiling": H - bb["height"],
+    }
+    return {"car": car, "clearances": clearances}
+
+
 def detect_debug_png(buf, scale, intr, expect=None):
     """Top-down (bird's-eye) PNG: all points grey, the detected object cyan, its
     bounding box green if it matches the expected vehicle size, amber if not.
