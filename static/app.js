@@ -205,7 +205,7 @@ els.doorPill.addEventListener('click', toggleDoor);
 els.lightsPill.addEventListener('click', toggleLights);
 
 // ─── Source switcher ─────────────────────────────────
-const SOURCE_CYCLE = ['synthetic', 'orbbec', 'disconnected'];
+const SOURCE_CYCLE = ['orbbec', 'disconnected'];
 
 async function cycleSource() {
   // Determine current from the pill text (uppercased server-side value).

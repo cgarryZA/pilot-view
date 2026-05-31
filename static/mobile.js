@@ -80,7 +80,7 @@ function setLiveBackground(url) {
 
 // ── source toggle: synthetic <-> camera ──
 els.chipSource.addEventListener('click', async () => {
-  const next = currentSource === 'orbbec' ? 'synthetic' : 'orbbec';
+  const next = currentSource === 'orbbec' ? 'disconnected' : 'orbbec';
   try {
     const res = await fetch('/api/source', {
       method: 'POST',

@@ -79,6 +79,7 @@ class OrbbecSource(CameraSource):
 
     def _detection_loop(self) -> None:
         from app import calibration, depth as depth_mod
+        miss = 0
         while self._running:
             time.sleep(0.35)
             d = self.get_depth()
@@ -99,9 +100,35 @@ class OrbbecSource(CameraSource):
                 except Exception:
                     pass
                 res = depth_mod.detect_car_garage(*d, pose=pose, garage=garage, expect=expect)
+                new_car = res.get("car") if res else None
                 with self._lock:
-                    self._car = res.get("car")
-                    self._clearances = res.get("clearances") or {}
+                    if new_car is not None:
+                        npp = new_car["position"]
+                        if self._car is not None:   # EMA-smooth so the box doesn't jitter
+                            a = 0.4
+                            op = self._car["position"]
+                            npp["x"] = op["x"] + a * (npp["x"] - op["x"])
+                            npp["z"] = op["z"] + a * (npp["z"] - op["z"])
+                        # clearances from the smoothed position
+                        ext = new_car["extent"]
+                        W = float(garage.get("width", 3.0))
+                        Ln = float(garage.get("length", 5.8))
+                        H = float(garage.get("height", 2.3))
+                        hl, hw = ext["length"] / 2, ext["width"] / 2
+                        self._clearances = {
+                            "front": Ln - (npp["z"] + hl),
+                            "rear": npp["z"] - hl,
+                            "left": W / 2 + npp["x"] - hw,
+                            "right": W / 2 - npp["x"] - hw,
+                            "ceiling": H - ext["height"],
+                        }
+                        self._car = new_car
+                        miss = 0
+                    else:                            # hysteresis: don't drop on a single miss
+                        miss += 1
+                        if miss >= 3:
+                            self._car = None
+                            self._clearances = {}
             except Exception as exc:
                 print(f"[orbbec] detection error: {exc}")
 

@@ -4,16 +4,17 @@ from pathlib import Path
 
 from app.sources.base import CameraSource
 from app.sources.disconnected import DisconnectedSource
-from app.sources.synthetic import SyntheticSource
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 ENV_FILE = PROJECT_ROOT / ".env"
 
-SOURCE_NAMES = ("disconnected", "synthetic", "orbbec")
+# Deployment sources only: the real camera, plus a "disconnected" fallback for
+# when it's unplugged. (The synthetic demo source was dev-only and removed.)
+SOURCE_NAMES = ("disconnected", "orbbec")
 
 
 def _orbbec_class():
-    """Lazy import OrbbecSource so dev machines without pyorbbecsdk still start."""
+    """Lazy import OrbbecSource so a machine without pyorbbecsdk still starts."""
     try:
         from app.sources.orbbec import OrbbecSource
         return OrbbecSource
@@ -24,7 +25,6 @@ def _orbbec_class():
 
 _REGISTRY: dict[str, type[CameraSource]] = {
     "disconnected": DisconnectedSource,
-    "synthetic": SyntheticSource,
 }
 
 
@@ -41,7 +41,7 @@ def _build(name: str) -> CameraSource:
 
 
 def make_source() -> CameraSource:
-    return _build(os.getenv("PILOT_VIEW_SOURCE", "disconnected"))
+    return _build(os.getenv("PILOT_VIEW_SOURCE", "orbbec"))
 
 
 def _persist_to_env(name: str) -> None:
@@ -69,12 +69,8 @@ def _persist_to_env(name: str) -> None:
 
 
 class SourceManager:
-    """Holds the active CameraSource and allows runtime swapping.
-
-    Other modules import the manager (not a particular source instance) and call
-    .state() on it. That way switching cameras doesn't require re-importing or
-    restarting the service.
-    """
+    """Holds the active CameraSource and allows runtime swapping. Other modules
+    import the manager (not a particular source) and call .state() on it."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -85,17 +81,11 @@ class SourceManager:
         return self._current.name
 
     def state(self) -> dict:
-        # Source.state() is itself thread-safe enough for our purposes; pulling
-        # the reference under the lock guards against a concurrent swap.
         with self._lock:
             src = self._current
         return src.state()
 
     def get_jpeg(self):
-        """Return the latest JPEG frame from the current source, or None.
-
-        Only sources with a video stream (orbbec) implement get_jpeg.
-        """
         with self._lock:
             src = self._current
         fn = getattr(src, "get_jpeg", None)
@@ -115,8 +105,6 @@ class SourceManager:
             raise ValueError(f"unknown source '{name}'")
         with self._lock:
             old = self._current
-            # Best-effort cleanup if the source exposes a close hook (orbbec might,
-            # eventually). Silent on failure — we still want the swap to proceed.
             close = getattr(old, "close", None)
             if callable(close):
                 try:
@@ -135,7 +123,6 @@ source_manager = SourceManager()
 __all__ = [
     "CameraSource",
     "DisconnectedSource",
-    "SyntheticSource",
     "SourceManager",
     "make_source",
     "source_manager",
