@@ -409,6 +409,31 @@ document.addEventListener('click', (ev) => {
   if (pose && currentCalibration) pose.open(currentCalibration, currentLiveUrl, currentCameraFov);
 });
 
+// Auto-align the camera pose straight from the depth sensor (no pinning).
+document.addEventListener('click', async (ev) => {
+  if (ev.target.id !== 'auto-pose-btn') return;
+  const btn = ev.target;
+  const status = document.getElementById('auto-pose-status');
+  btn.disabled = true;
+  if (status) status.textContent = 'Reading depth…';
+  try {
+    const res = await fetch('/api/calibration/auto_pose', { method: 'POST', credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (status) status.textContent = data.detail || `Failed (HTTP ${res.status})`;
+      return;
+    }
+    if (status) {
+      status.textContent = `Aligned · floor ${data.floor_height} m · wall ${data.wall_distance} m`;
+    }
+    if (calib && calib.reload) calib.reload();   // pull the saved pose into the scene
+  } catch (err) {
+    if (status) status.textContent = 'Error: ' + (err.message || err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 function showDisconnected() {
   els.disconnected.classList.remove('hidden');
   els.connected.classList.add('hidden');

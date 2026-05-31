@@ -282,8 +282,13 @@
                     <span class="calib-unit">°</span>
                   </div>
 
-                  <div class="calib-group-title">Pose calibration</div>
-                  <div class="calib-hint">Pin the four corners of the garage door opening on the live image. We'll solve for the camera position and orientation that fits those pins.</div>
+                  <div class="calib-group-title">Auto-align (depth)</div>
+                  <div class="calib-hint">Uses the depth camera to find the floor and the wall it faces, then places the camera automatically. Best with a clear floor — works great in a bare garage.</div>
+                  <button class="calib-btn" id="auto-pose-btn" type="button">Auto-align from depth</button>
+                  <div class="calib-saved" id="auto-pose-status"></div>
+
+                  <div class="calib-group-title">Pose calibration (manual)</div>
+                  <div class="calib-hint">Or pin the corners on the live image and we solve the pose to fit them.</div>
                   <button class="calib-btn" id="pose-pin-open" type="button">Pin door corners on image</button>
                 </section>
 
