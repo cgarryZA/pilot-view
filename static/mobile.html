@@ -57,6 +57,22 @@
       </nav>
     </div>
 
+    <div class="m-sheet hidden" id="cal-sheet">
+      <div class="m-sheet-bar">
+        <span class="m-sheet-title">CALIBRATION</span>
+        <button class="m-sheet-x" id="cal-close" type="button">×</button>
+      </div>
+      <button class="m-sheet-primary" id="cal-align" type="button">Auto-align &amp; measure from depth</button>
+      <div class="m-sheet-status" id="cal-status">Finds the floor + walls and measures the garage. Nudge any value below if a wall wasn't fully visible.</div>
+      <div class="m-sheet-grid">
+        <label>Width <input type="number" step="0.05" min="1.5" max="6" data-path="garage.width" /></label>
+        <label>Length <input type="number" step="0.05" min="2" max="12" data-path="garage.length" /></label>
+        <label>Height <input type="number" step="0.05" min="1.8" max="4" data-path="garage.height" /></label>
+        <label>Door&nbsp;W <input type="number" step="0.05" min="1.5" max="5" data-path="garage.door_opening_width" /></label>
+        <label>Door&nbsp;H <input type="number" step="0.05" min="1.5" max="3" data-path="garage.door_opening_height" /></label>
+      </div>
+    </div>
+
     <div class="m-toast" id="toast" role="status" aria-live="polite"></div>
     <script type="module" src="/static/mobile.js"></script>
   </body>

@@ -251,12 +251,25 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
     up_g = R_gc @ np.array([0.0, -1.0, 0.0])     # camera up is -Y_cam
     look = pos + forward
 
+    # Measure the garage envelope: transform all points to garage coords and take
+    # robust extents (2nd/98th percentile to shrug off stray points). Floor is
+    # y=0; side walls bound x; the ceiling bounds y; the bay depth ≈ how far the
+    # floor runs toward the camera (≈ wall distance). Clamped to sane ranges.
+    Pg = P @ R_gc.T + pos
+    Wm = float(np.percentile(Pg[:, 0], 98) - np.percentile(Pg[:, 0], 2))
+    Hm = float(np.percentile(Pg[:, 1], 98))
+    Lm = float(max(np.percentile(Pg[:, 2], 98), d_wall))
+    Wm = min(6.0, max(1.5, Wm))
+    Lm = min(12.0, max(2.0, Lm))
+    Hm = min(4.0, max(1.8, Hm))
+
     d3 = lambda v: {"x": float(v[0]), "y": float(v[1]), "z": float(v[2])}
     return {
         "camera_position": d3(pos),
         "camera_look_at": d3(look),
         "camera_up": d3(up_g),
         "camera_fov_deg": float(fov_deg),
+        "garage": {"width": round(Wm, 2), "length": round(Lm, 2), "height": round(Hm, 2)},
         "floor_height": round(h, 3),
         "wall_distance": round(d_wall, 3),
         "floor_points": floor["count"],

@@ -8,6 +8,10 @@ const els = {
   chipSource: $('chip-source'),
   chipVehicle: $('chip-vehicle'),
   tabAlign: $('tab-align'),
+  calSheet: $('cal-sheet'),
+  calClose: $('cal-close'),
+  calAlign: $('cal-align'),
+  calStatus: $('cal-status'),
   srcName: $('src-name'),
   connDot: $('conn-dot'),
   viewToggle: $('viewtoggle'),
@@ -100,21 +104,62 @@ els.chipVehicle.addEventListener('click', async () => {
   catch (err) { /* ignore */ }
 });
 
-// ── auto-align the camera pose from depth (calibrate in the garage) ──
-els.tabAlign.addEventListener('click', async () => {
-  showToast('Reading depth…');
+// ── calibration sheet: auto-align + measure, with editable garage dims ──
+const calInputs = els.calSheet ? Array.from(els.calSheet.querySelectorAll('input[data-path]')) : [];
+
+function getPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+}
+
+async function loadCalIntoSheet(applyToScene = true) {
+  const cal = await fetch('/api/calibration', { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null);
+  if (!cal) return;
+  for (const inp of calInputs) {
+    const v = getPath(cal, inp.dataset.path);
+    if (v != null) inp.value = v;
+  }
+  if (applyToScene && scene && scene.applyCalibration) scene.applyCalibration(cal);
+}
+
+els.tabAlign.addEventListener('click', () => {
+  els.calSheet.classList.remove('hidden');
+  loadCalIntoSheet();
+});
+els.calClose.addEventListener('click', () => els.calSheet.classList.add('hidden'));
+
+els.calAlign.addEventListener('click', async () => {
+  els.calStatus.textContent = 'Reading depth…';
   try {
     const res = await fetch('/api/calibration/auto_pose', { method: 'POST' });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.detail || 'Align failed', 'danger'); return; }
-    showToast(`Aligned · floor ${data.floor_height} m · wall ${data.wall_distance} m`, 'info', 2600);
-    // Pull the saved pose into the scene immediately.
-    const cal = await fetch('/api/calibration', { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null);
-    if (cal && scene && scene.applyCalibration) scene.applyCalibration(cal);
+    if (!res.ok) { els.calStatus.textContent = data.detail || 'Align failed'; return; }
+    const g = data.garage || {};
+    els.calStatus.textContent = `Aligned · measured ${g.width}×${g.length}×${g.height} m. Nudge below if needed.`;
+    await loadCalIntoSheet();   // refresh fields with the measured dims + apply pose
   } catch (err) {
-    showToast('Align error', 'danger');
+    els.calStatus.textContent = 'Align error';
   }
 });
+
+// Nudge a dimension → save (deep-merged) and re-apply to the scene live.
+for (const inp of calInputs) {
+  inp.addEventListener('change', async () => {
+    const val = parseFloat(inp.value);
+    if (isNaN(val)) return;
+    const keys = inp.dataset.path.split('.');
+    const body = {};
+    let node = body;
+    keys.slice(0, -1).forEach((k) => { node[k] = {}; node = node[k]; });
+    node[keys[keys.length - 1]] = val;
+    try {
+      await fetch('/api/calibration', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body), credentials: 'same-origin',
+      });
+      await loadCalIntoSheet();   // re-apply to scene with the nudged value
+    } catch (err) { /* ignore */ }
+  });
+}
 
 // ── state application ──
 function applyState(p) {

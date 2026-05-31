@@ -244,14 +244,19 @@ def auto_pose(_=Depends(require_auth)):
     result = depth.auto_pose_from_depth(*d, fov_deg=float(fov))
     if result is None:
         raise HTTPException(400, "could not fit a floor + facing wall from the depth cloud")
-    calibration.save({
+    updates = {
         "live_view": {
             "camera_position": result["camera_position"],
             "camera_look_at": result["camera_look_at"],
             "camera_up": result["camera_up"],
             "camera_fov_deg": result["camera_fov_deg"],
         },
-    })
+    }
+    # Auto-measured garage envelope (deep-merged, so door dims are preserved).
+    # Editable afterward in the Garage tab if a wall wasn't fully visible.
+    if result.get("garage"):
+        updates["garage"] = result["garage"]
+    calibration.save(updates)
     return result
 
 
