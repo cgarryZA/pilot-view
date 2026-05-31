@@ -226,8 +226,15 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
         up_cam = floor["n"] / np.linalg.norm(floor["n"])
         h = floor["d"]
     others = [p for p in planes if p is not floor]
-    # Facing wall: vertical (small |n_y|), large, and faced by the camera.
-    wall = max(others, key=lambda p: abs(p["n"][2]) * p["count"] * (1.0 if abs(p["n"][1]) < 0.5 else 0.15))
+    # Door/back wall = the FURTHEST wall the camera faces (the user's invariant:
+    # the garage door is always the furthest plane). Among vertical planes in
+    # front of the camera (normal points back toward it → n_z < 0), take the one
+    # with the greatest distance. Falls back to "most head-on" if none qualify.
+    forward_walls = [p for p in others if abs(p["n"][1]) < 0.5 and p["n"][2] < -0.2]
+    if forward_walls:
+        wall = max(forward_walls, key=lambda p: p["d"])
+    else:
+        wall = max(others, key=lambda p: abs(p["n"][2]) * p["count"] * (1.0 if abs(p["n"][1]) < 0.5 else 0.15))
     # Garage +Z (back wall → into room) in camera frame ≈ wall normal, made ⊥ to up.
     zc = wall["n"] - up_cam * float(wall["n"].dot(up_cam))
     zc = zc / np.linalg.norm(zc)
