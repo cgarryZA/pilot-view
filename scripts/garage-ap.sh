@@ -45,7 +45,7 @@ cmd_install() {
   local country="${1:-}" ssid="${2:-PilotView}" psk="${3:-}"
   if [ -z "$country" ] || [ -z "$psk" ]; then
     echo "usage: sudo bash $0 install <COUNTRY_CODE> <SSID> <WIFI_PASSWORD>"
-    echo "  e.g. sudo bash $0 install GB PilotView 'Garage-Lambo-9173!'"
+    echo "  e.g. sudo bash $0 install GB PilotView '<choose-a-strong-password>'"
     exit 1
   fi
   if [ "${#psk}" -lt 8 ]; then echo "ERROR: Wi-Fi password must be >= 8 characters"; exit 1; fi
@@ -81,14 +81,27 @@ EOF
     wifi-sec.psk "$psk" \
     connection.autoconnect no
 
-  echo "[4/5] disabling app login (Wi-Fi password becomes the gate)…"
+  echo "[4/5] relaxing the dashboard login + gating the admin terminal…"
+  # On the AP the Wi-Fi/WPA2 password gates the *dashboard* (PILOT_VIEW_AUTH=disabled
+  # so the phone needs no passkey). The web terminal is a ROOT-CAPABLE shell, so it
+  # is gated separately by a random token even when the dashboard login is off —
+  # the Wi-Fi password alone must never hand a stranger a shell.
+  local term_token; term_token="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 28)"
   mkdir -p "/etc/systemd/system/${SERVICE}.service.d"
   cat >"/etc/systemd/system/${SERVICE}.service.d/override.conf" <<EOF
 [Service]
 Environment=PILOT_VIEW_AUTH=disabled
+Environment=PILOT_VIEW_TERMINAL=enabled
+Environment=PILOT_VIEW_TERMINAL_TOKEN=$term_token
 EOF
+  chmod 600 "/etc/systemd/system/${SERVICE}.service.d/override.conf"
   systemctl daemon-reload
   systemctl restart "$SERVICE" 2>/dev/null || true
+  echo
+  echo "  >> TERMINAL TOKEN (save this — it's the gate to the admin shell):"
+  echo "        $term_token"
+  echo "     Open the terminal at:  http://${GATEWAY_IP}:8000/terminal?token=$term_token"
+  echo "     (It is remembered in the browser after the first visit.)"
 
   echo "[5/5] turning off Tailscale…"
   tailscale down >/dev/null 2>&1 || true
@@ -133,7 +146,7 @@ cmd_finalize() {
   local country="${1:-}" psk="${2:-}"
   if [ -z "$country" ] || [ -z "$psk" ]; then
     echo "usage: sudo bash $0 finalize <COUNTRY_CODE> <WIFI_PASSWORD>"
-    echo "  e.g. sudo bash $0 finalize GB 'Garage-Lambo-9173!'"
+    echo "  e.g. sudo bash $0 finalize GB '<choose-a-strong-password>'"
     exit 1
   fi
   if [ "${#psk}" -lt 8 ]; then echo "ERROR: Wi-Fi password must be >= 8 characters"; exit 1; fi

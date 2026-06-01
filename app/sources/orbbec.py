@@ -10,6 +10,8 @@ Robust to hot-plug: if the pipeline errors (cable yanked, USB hiccup) the loop
 catches it, clears the latest frame, and retries every few seconds.
 """
 
+import copy
+import logging
 import math
 import threading
 import time
@@ -19,8 +21,13 @@ from typing import Optional
 from app import calibration
 from app.sources.base import CameraSource
 
+logger = logging.getLogger("pilot_view.orbbec")
+
 RECONNECT_DELAY_SECONDS = 3.0
 FRAME_STALE_SECONDS = 2.0  # if no frame in this long, treat as not-streaming
+DETECT_ACTIVE_SECONDS = 0.35   # poll cadence while a car is tracked
+DETECT_IDLE_SECONDS = 1.5      # backed-off cadence when the bay is empty
+STOPPED_SPEED_MPS = 0.03       # below this the car counts as parked (not moving)
 
 # Preferred colour profile — MJPG keeps bandwidth low enough for USB 2.0.
 PREFERRED = [
@@ -32,6 +39,38 @@ PREFERRED = [
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def quiet_orbbec_logs(sdk) -> None:
+    """Turn the OrbbecSDK's own logging down to ERROR. By default it writes
+    per-frame info/warning lines to Log/OrbbecSDK.log.txt continuously (hundreds
+    of MB/day on a 24/7 deployment → eventually fills the disk). The exact API
+    name varies across pyorbbecsdk versions, so probe defensively."""
+    try:
+        sev = None
+        for enum_name in ("OBLogLevel", "OBLogSeverity"):
+            enum = getattr(sdk, enum_name, None)
+            if enum is None:
+                continue
+            for attr in ("ERROR", "OB_LOG_SEVERITY_ERROR", "OB_LOG_LEVEL_ERROR"):
+                sev = getattr(enum, attr, None)
+                if sev is not None:
+                    break
+            if sev is not None:
+                break
+        ctx = getattr(sdk, "Context", None)
+        if ctx is None or sev is None:
+            return
+        for meth in ("set_logger_to_console", "set_logger_severity", "set_logger_level"):
+            fn = getattr(ctx, meth, None)
+            if callable(fn):
+                try:
+                    fn(sev)
+                    return
+                except Exception:
+                    continue
+    except Exception:
+        pass
 
 
 class OrbbecSource(CameraSource):
@@ -50,6 +89,11 @@ class OrbbecSource(CameraSource):
         self._depth_intr = None                 # (fx, fy, cx, cy)
         self._car = None                        # detected car (garage frame) or None
         self._clearances: dict = {}             # per-side clearances (m)
+        self._moving = True                     # is the car moving? (drives "parked")
+        self._last_pos = None                   # last smoothed (x, z) for speed est.
+        self._last_pos_ts = 0.0
+        self._gate_warned = False               # throttle the size-gate-unavailable log
+        self._vehicles_logged = False           # log vehicles driver once
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._det_thread: Optional[threading.Thread] = None
@@ -62,6 +106,7 @@ class OrbbecSource(CameraSource):
             self._cv2 = cv2
             self._np = np
             self._sdk_loaded = True
+            quiet_orbbec_logs(pyorbbecsdk)
         except Exception as exc:  # pragma: no cover — environmental
             self._sdk_loaded = False
             self._last_error = f"pyorbbecsdk import failed: {exc}"
@@ -77,11 +122,46 @@ class OrbbecSource(CameraSource):
 
     # ── car detection thread ────────────────────────────────────────────
 
+    def _expected_extent(self):
+        """(length, width, height) of the active vehicle, or None. Logged on
+        failure — a silently-missing extent would disable the size gate."""
+        try:
+            from app.vehicles import vehicles
+            if not self._vehicles_logged:
+                logger.info("vehicles driver=%s", vehicles.driver_name)
+                self._vehicles_logged = True
+            ext = (vehicles.state_dict().get("active") or {}).get("extent")
+            if ext and all(k in ext for k in ("length", "width", "height")):
+                return (float(ext["length"]), float(ext["width"]), float(ext["height"]))
+        except Exception:
+            logger.exception("active-vehicle extent lookup failed")
+        return None
+
+    def _update_motion(self, pos) -> None:
+        """Estimate whether the car is moving from successive smoothed positions
+        (caller holds the lock). Drives the 'parked' (stopped + clear) state."""
+        now = time.monotonic()
+        if self._last_pos is not None:
+            dt = now - self._last_pos_ts
+            if dt > 1e-3:
+                dx = pos["x"] - self._last_pos[0]
+                dz = pos["z"] - self._last_pos[1]
+                speed = (dx * dx + dz * dz) ** 0.5 / dt
+                self._moving = speed > STOPPED_SPEED_MPS
+        self._last_pos = (pos["x"], pos["z"])
+        self._last_pos_ts = now
+
     def _detection_loop(self) -> None:
         from app import calibration, depth as depth_mod
         miss = 0
         while self._running:
-            time.sleep(0.35)
+            # Idle backoff: poll fast while a car is tracked (the drive-in moment
+            # that matters), slow when the bay is empty so we aren't running
+            # RANSAC + clustering several times a second, 24/7.
+            with self._lock:
+                tracking = self._car is not None
+            time.sleep(DETECT_ACTIVE_SECONDS if tracking else DETECT_IDLE_SECONDS)
+
             d = self.get_depth()
             if d is None:
                 continue
@@ -91,16 +171,21 @@ class OrbbecSource(CameraSource):
                 garage = cal.get("garage", {})
                 if not pose:
                     continue
-                expect = None
-                try:
-                    from app.vehicles import vehicles
-                    ext = (vehicles.state_dict().get("active") or {}).get("extent")
-                    if ext and all(k in ext for k in ("length", "width", "height")):
-                        expect = (float(ext["length"]), float(ext["width"]), float(ext["height"]))
-                except Exception:
-                    pass
-                res = depth_mod.detect_car_garage(*d, pose=pose, garage=garage, expect=expect)
-                new_car = res.get("car") if res else None
+
+                expect = self._expected_extent()
+                if expect is None:
+                    # Without a known vehicle extent the size gate can't run.
+                    # Refuse to detect ungated (a person/bin/ladder would be
+                    # accepted as "the car"); treat as no car and warn once.
+                    if not self._gate_warned:
+                        logger.warning("size gate unavailable (no active-vehicle extent); detection paused")
+                        self._gate_warned = True
+                    new_car = None
+                else:
+                    self._gate_warned = False
+                    res = depth_mod.detect_car_garage(*d, pose=pose, garage=garage, expect=expect)
+                    new_car = res.get("car") if res else None
+
                 with self._lock:
                     if new_car is not None:
                         npp = new_car["position"]
@@ -122,6 +207,7 @@ class OrbbecSource(CameraSource):
                             "right": W / 2 - npp["x"] - hw,
                             "ceiling": H - ext["height"],
                         }
+                        self._update_motion(npp)
                         self._car = new_car
                         miss = 0
                     else:                            # hysteresis: don't drop on a single miss
@@ -129,8 +215,10 @@ class OrbbecSource(CameraSource):
                         if miss >= 3:
                             self._car = None
                             self._clearances = {}
-            except Exception as exc:
-                print(f"[orbbec] detection error: {exc}")
+                            self._moving = True
+                            self._last_pos = None
+            except Exception:
+                logger.exception("detection loop error")
 
     # ── capture thread ──────────────────────────────────────────────────
 
@@ -324,21 +412,36 @@ class OrbbecSource(CameraSource):
         thresholds = cal.get("thresholds", {"warn": 0.5, "danger": 0.2})
 
         streaming = self._streaming()
+        # Has the camera pose actually been calibrated (auto-align / pose solve),
+        # versus the bare DEFAULTS pose? Drives "uncalibrated" vs "searching".
+        calibrated = bool(cal.get("live_view", {}).get("calibrated"))
         with self._lock:
             info = self._device_info
             error = self._last_error
             last_attempt = self._last_attempt
             fov_deg = self._fov_deg
-            car = self._car
+            # Deep-copy so the serialized snapshot can't tear if the detection
+            # thread mutates self._car in place between here and JSON encoding.
+            car = copy.deepcopy(self._car) if self._car else None
             clearances = dict(self._clearances)
+            moving = self._moving
 
         warn = thresholds.get("warn", 0.5)
         danger = thresholds.get("danger", 0.2)
         if clearances:
             smallest = min(clearances.values())
-            state_label = "danger" if smallest < danger else ("warning" if smallest < warn else "safe")
+            if smallest < danger:
+                state_label = "danger"
+            elif smallest < warn:
+                state_label = "warning"
+            elif not moving:
+                state_label = "parked"      # stopped AND clear → OK to get out
+            else:
+                state_label = "safe"        # clear but still moving
         else:
-            state_label = "safe"
+            # Streaming but no car-sized cluster found. NEVER show this as green
+            # "safe" — that's indistinguishable from "all clear, keep going".
+            state_label = "searching" if calibrated else "uncalibrated"
 
         geometry = None
         live_url = None

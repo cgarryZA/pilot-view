@@ -30,10 +30,17 @@ _REGISTRY: dict[str, type[CameraSource]] = {
 
 def _build(name: str) -> CameraSource:
     name = (name or "").strip().lower()
+    # Reject unknown names (e.g. a stale PILOT_VIEW_SOURCE=synthetic left in .env
+    # from before the synthetic source was removed). Fall back to the REAL camera,
+    # not 'disconnected' — a silently-dead camera with a healthy-looking app is the
+    # worst failure mode for a parking assistant.
+    if name not in SOURCE_NAMES:
+        print(f"[sources] unknown source '{name}'; falling back to 'orbbec'", flush=True)
+        name = "orbbec"
     if name == "orbbec":
         cls = _orbbec_class()
         if cls is None:
-            print("[sources] Falling back to DisconnectedSource (orbbec import failed)")
+            print("[sources] Falling back to DisconnectedSource (orbbec import failed)", flush=True)
             cls = DisconnectedSource
         return cls()
     cls = _REGISTRY.get(name, DisconnectedSource)
@@ -41,7 +48,10 @@ def _build(name: str) -> CameraSource:
 
 
 def make_source() -> CameraSource:
-    return _build(os.getenv("PILOT_VIEW_SOURCE", "orbbec"))
+    requested = os.getenv("PILOT_VIEW_SOURCE", "orbbec")
+    src = _build(requested)
+    print(f"[sources] startup source = '{src.name}' (requested '{requested}')", flush=True)
+    return src
 
 
 def _persist_to_env(name: str) -> None:

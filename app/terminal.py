@@ -10,17 +10,25 @@ Protocol (client → server): JSON text frames
     {"type": "resize", "cols": N, "rows": M}
 Server → client: raw terminal output as binary frames.
 
-Security: gated exactly like the main /ws. When PILOT_VIEW_AUTH=disabled the
-Wi-Fi/WPA2 password is the only gate (the model the AP setup uses); otherwise a
-valid session cookie is required. Set PILOT_VIEW_TERMINAL=disabled to turn the
-feature off completely.
+Security — this is a root-capable shell, so it is gated independently of the
+dashboard:
+  • OPT-IN: the feature is OFF unless PILOT_VIEW_TERMINAL=enabled.
+  • A valid session cookie always authorises (normal logged-in use).
+  • Otherwise a token is required as a ?token= query param. It comes from
+    PILOT_VIEW_TERMINAL_TOKEN (set by the AP setup); if the terminal is enabled
+    with no token configured we mint a random one at startup and log it.
+  • We deliberately do NOT honour PILOT_VIEW_AUTH=disabled here. Disabling the
+    app login (so a phone can use the dashboard on the AP without a passkey) must
+    never, on its own, hand a stranger on the Wi-Fi a shell.
 """
 
 import asyncio
 import json
 import os
+import secrets
 import signal
 import struct
+from typing import Optional
 
 # pty/fcntl/termios are Unix-only. Guard them so the app can still run on a
 # Windows dev box (the web terminal simply disables itself there).
@@ -34,26 +42,59 @@ except ImportError:  # pragma: no cover — non-Unix dev machine
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from app.passkeys import SESSION_COOKIE_NAME, sessions
+from app.passkeys import session_from_cookies
 
 SHELL = "/bin/bash"
+
+# A process-lifetime token, minted only if the terminal is enabled without an
+# explicit PILOT_VIEW_TERMINAL_TOKEN. Logged once so an admin can recover it.
+_RUNTIME_TOKEN: Optional[str] = None
 
 
 def terminal_enabled() -> bool:
     if not _PTY_AVAILABLE:
         return False
-    return os.getenv("PILOT_VIEW_TERMINAL", "enabled").strip().lower() != "disabled"
+    # Opt-in: the shell is off unless explicitly enabled.
+    return os.getenv("PILOT_VIEW_TERMINAL", "disabled").strip().lower() == "enabled"
 
 
-def _auth_disabled() -> bool:
-    return os.getenv("PILOT_VIEW_AUTH", "enabled").strip().lower() == "disabled"
+def _configured_token() -> Optional[str]:
+    tok = os.getenv("PILOT_VIEW_TERMINAL_TOKEN", "").strip()
+    return tok or None
+
+
+def _effective_token() -> Optional[str]:
+    """The token a client must present: the configured one, or a random one
+    minted (and logged) the first time it's needed."""
+    global _RUNTIME_TOKEN
+    tok = _configured_token()
+    if tok:
+        return tok
+    if _RUNTIME_TOKEN is None:
+        _RUNTIME_TOKEN = secrets.token_urlsafe(18)
+        print(
+            "[terminal] PILOT_VIEW_TERMINAL_TOKEN is not set; generated a one-time "
+            f"token for this run: {_RUNTIME_TOKEN}",
+            flush=True,
+        )
+        print(f"[terminal]   connect via  /terminal?token={_RUNTIME_TOKEN}", flush=True)
+    return _RUNTIME_TOKEN
+
+
+def _has_valid_session(socket: WebSocket) -> bool:
+    return session_from_cookies(socket.cookies) is not None
 
 
 def _authorized(socket: WebSocket) -> bool:
-    if _auth_disabled():
+    # A genuine authenticated session always works.
+    if _has_valid_session(socket):
         return True
-    sid = socket.cookies.get(SESSION_COOKIE_NAME)
-    return bool(sid and sessions.get(sid))
+    # Otherwise require the terminal token. Constant-time compare. Crucially this
+    # path is reachable even when PILOT_VIEW_AUTH=disabled — that flag relaxes the
+    # dashboard, never the shell.
+    presented = socket.query_params.get("token") if socket.query_params else None
+    expected = _effective_token()
+    return bool(presented and expected and secrets.compare_digest(presented, expected))
 
 
 async def terminal_endpoint(socket: WebSocket) -> None:

@@ -11,7 +11,7 @@ from app.auth import require_auth, current_session
 from app.battery_monitor import battery_monitor
 from app.door import door
 from app.lights import lights
-from app.passkeys import SESSION_COOKIE_NAME, sessions
+from app.passkeys import session_from_cookies
 from app.sensors import sensors
 from app.sources import SOURCE_NAMES, source_manager
 from app.vehicles import vehicles
@@ -65,11 +65,19 @@ def depth_page():
 
 
 def _depth_frame():
-    """Prefer the active source's depth (orbbec, one shared pipeline); fall back
-    to the standalone depth camera (e.g. when running source=synthetic on dev)."""
+    """Depth from the active source (orbbec owns the one shared USB pipeline).
+
+    The standalone depth.depth_camera is a *separate* pyorbbecsdk pipeline. Opening
+    it while OrbbecSource already holds the device causes device-busy/frame stalls,
+    so we only ever use it when the active source isn't the orbbec one (it never is
+    in deployment). When orbbec is active but momentarily frame-less (boot, USB
+    reconnect) we return None and let the caller show 'waiting' rather than racing
+    a second owner onto the camera."""
     d = source_manager.get_depth()
     if d is not None:
         return d
+    if source_manager.name == "orbbec":
+        return None
     return depth.depth_camera.get_depth()
 
 
@@ -214,6 +222,7 @@ async def solve_pose(payload: dict, _=Depends(require_auth)):
             "camera_look_at":  result["camera_look_at"],
             "camera_up":       result["camera_up"],
             "camera_fov_deg":  result["camera_fov_deg"],
+            "calibrated": True,
         },
     }
     # Apply derived door dimensions if back-projection succeeded.
@@ -250,6 +259,7 @@ def auto_pose(_=Depends(require_auth)):
             "camera_look_at": result["camera_look_at"],
             "camera_up": result["camera_up"],
             "camera_fov_deg": result["camera_fov_deg"],
+            "calibrated": True,
         },
     }
     # Auto-measured garage envelope (deep-merged, so door dims are preserved).
@@ -397,11 +407,9 @@ def _ws_payload() -> dict:
 async def ws(socket: WebSocket):
     import os as _os
     auth_disabled = _os.getenv("PILOT_VIEW_AUTH", "enabled").strip().lower() == "disabled"
-    if not auth_disabled:
-        sid = socket.cookies.get(SESSION_COOKIE_NAME)
-        if not sid or not sessions.get(sid):
-            await socket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+    if not auth_disabled and session_from_cookies(socket.cookies) is None:
+        await socket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
     await socket.accept()
     try:
         while True:

@@ -1,0 +1,33 @@
+# Pilot View systemd unit — the source-of-truth copy of what runs on the Pi.
+#
+# Install:
+#   sudo cp deploy/pilot-view.service /etc/systemd/system/pilot-view.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pilot-view
+#   systemctl status pilot-view        # verify it's active (running)
+#
+# Paths assume the deploy user is "pilot-view" with the repo at
+# /home/pilot-view/pilot-view and a venv at .venv. Adjust User/paths if yours
+# differ. The app reads .env via the env.conf drop-in (see deploy/README.md);
+# the AP setup adds an override.conf drop-in for AP-mode environment.
+[Unit]
+Description=Pilot View Garage Vision Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pilot-view
+WorkingDirectory=/home/pilot-view/pilot-view
+Environment="PATH=/home/pilot-view/pilot-view/.venv/bin"
+# Fail fast on a syntax-broken deploy (compile-only: no imports, no camera open).
+ExecStartPre=/home/pilot-view/pilot-view/.venv/bin/python -m py_compile app/main.py app/depth.py app/sources/orbbec.py
+ExecStart=/home/pilot-view/pilot-view/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+# Survive crashes and power-cuts.
+Restart=always
+RestartSec=3
+# Don't let a crash-loop hammer the box forever-silently.
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Install]
+WantedBy=multi-user.target

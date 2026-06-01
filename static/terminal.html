@@ -86,9 +86,21 @@
         var ws = null;
         var reconnectTimer = null;
 
+        // Terminal access token — gates the root-capable shell. Take it from
+        // ?token=, remember it so a refresh/return still authenticates. A valid
+        // session cookie, if present, authenticates without any token.
+        var token = '';
+        try {
+          var qp = new URLSearchParams(location.search);
+          token = qp.get('token') || '';
+          if (token) localStorage.setItem('pv_term_token', token);
+          else token = localStorage.getItem('pv_term_token') || '';
+        } catch (e) { token = ''; }
+
         function wsUrl() {
           var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-          return proto + '://' + location.host + '/api/terminal/ws';
+          var qs = token ? ('?token=' + encodeURIComponent(token)) : '';
+          return proto + '://' + location.host + '/api/terminal/ws' + qs;
         }
 
         function sendResize() {
@@ -118,8 +130,13 @@
           };
           ws.onclose = function (ev) {
             setStatus('off');
-            term.writeln('\r\n\x1b[31m[disconnected' + (ev.code ? ' ' + ev.code : '') +
-              ']\x1b[0m  tap ↻ Reconnect');
+            if (ev && ev.code === 1008) {
+              term.writeln('\r\n\x1b[31m[refused]\x1b[0m terminal disabled, or a token is required.');
+              term.writeln('Open this page as  /terminal?token=YOUR_TOKEN  (shown in the AP setup output / service log).');
+            } else {
+              term.writeln('\r\n\x1b[31m[disconnected' + (ev.code ? ' ' + ev.code : '') +
+                ']\x1b[0m  tap ↻ Reconnect');
+            }
           };
           ws.onerror = function () { try { ws.close(); } catch (e) {} };
         }

@@ -1,0 +1,27 @@
+# OPTIONAL hardening (defence-in-depth for the web terminal).
+#
+# The service runs as the non-root user "pilot-view". The web terminal (a
+# root-capable shell when sudo is unrestricted) is already gated by a token and
+# disabled by default — but if you want to limit the blast radius further, give
+# the pilot-view user passwordless sudo for ONLY the commands the app actually
+# needs, instead of broad sudo.
+#
+# Install (validate first — a broken sudoers file can lock you out):
+#   sudo cp deploy/pilot-view.sudoers.example /etc/sudoers.d/pilot-view
+#   sudo chmod 440 /etc/sudoers.d/pilot-view
+#   sudo visudo -c            # MUST report "parsed OK" before you log out
+#
+# NOTE: scoping sudo like this means a general `sudo <anything-else>` from the
+# terminal will be denied. That is the point. Re-add entries here if you add
+# new admin actions.
+
+Cmnd_Alias PILOTVIEW = \
+    /usr/bin/systemctl restart pilot-view, \
+    /usr/bin/systemctl stop pilot-view, \
+    /usr/bin/systemctl start pilot-view, \
+    /usr/bin/systemctl status pilot-view, \
+    /usr/bin/bash /home/pilot-view/pilot-view/scripts/garage-ap.sh *, \
+    /usr/sbin/nmcli *, \
+    /usr/bin/nmcli *
+
+pilot-view ALL=(root) NOPASSWD: PILOTVIEW

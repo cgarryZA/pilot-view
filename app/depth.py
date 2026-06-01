@@ -58,12 +58,22 @@ def _ransac_plane(P: np.ndarray, iters: int = 60, thresh: float = 0.035):
     return best_mask
 
 
-def _voxel_cluster(P: np.ndarray, voxel: float = 0.05) -> np.ndarray:
+def _voxel_cluster(P: np.ndarray, voxel: float = 0.05, max_voxels: int = 8_000_000) -> np.ndarray:
     """Label points into connected clusters via a voxel occupancy grid.
-    Returns an int label per point (0 = unlabelled/empty)."""
+    Returns an int label per point (0 = unlabelled/empty).
+
+    The dense occupancy grid is sized by the point spread, so a few stray
+    far-range points (unbounded sensor input) could otherwise allocate a huge
+    array. Coarsen the voxel until the grid fits max_voxels (8M bools ≈ 8 MB)."""
     if len(P) == 0:
         return np.zeros(0, dtype=np.int32)
     mins = P.min(axis=0)
+    span = P.max(axis=0) - mins
+    while voxel < 1.0:
+        cells = np.prod(np.floor(span / voxel).astype(np.int64) + 1, dtype=np.float64)
+        if cells <= max_voxels:
+            break
+        voxel *= 1.5
     idx = np.floor((P - mins) / voxel).astype(np.int64)
     shape = idx.max(axis=0) + 1
     occ = np.zeros(tuple(shape), dtype=bool)
@@ -244,24 +254,36 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
     R_gc = R_cg.T                               # camera vector → garage vector
     d_wall = wall["d"]
 
-    # Centre laterally so the visible wall spans x=0.
-    x0 = -float((P[wall["idx"]] @ xc).mean())
+    # Lateral reference: derive the origin (x=0) AND the width from ONE source —
+    # the 2nd/98th percentiles of every point projected onto the lateral axis xc.
+    # Anchoring x=0 on the wall centroid while measuring width from the full cloud
+    # biased every left/right clearance by the offset between the two references;
+    # using the same span makes the symmetric volume [-W/2, +W/2] truly centred.
+    xs = P @ xc
+    x_lo, x_hi = (float(v) for v in np.percentile(xs, [2, 98]))
+    x0 = -(x_lo + x_hi) / 2.0
+    Wm_raw = x_hi - x_lo
     pos = np.array([x0, h, d_wall], dtype=np.float64)
     forward = R_gc @ np.array([0.0, 0.0, 1.0])   # camera looks along +Z_cam
     up_g = R_gc @ np.array([0.0, -1.0, 0.0])     # camera up is -Y_cam
     look = pos + forward
 
-    # Measure the garage envelope: transform all points to garage coords and take
-    # robust extents (2nd/98th percentile to shrug off stray points). Floor is
-    # y=0; side walls bound x; the ceiling bounds y; the bay depth ≈ how far the
-    # floor runs toward the camera (≈ wall distance). Clamped to sane ranges.
+    # Height/length from the same garage-frame cloud (floor=y=0; ceiling bounds y;
+    # bay depth ≈ how far the floor runs toward the camera, ≥ wall distance).
     Pg = P @ R_gc.T + pos
-    Wm = float(np.percentile(Pg[:, 0], 98) - np.percentile(Pg[:, 0], 2))
-    Hm = float(np.percentile(Pg[:, 1], 98))
-    Lm = float(max(np.percentile(Pg[:, 2], 98), d_wall))
-    Wm = min(6.0, max(1.5, Wm))
-    Lm = min(12.0, max(2.0, Lm))
-    Hm = min(4.0, max(1.8, Hm))
+    Hm_raw = float(np.percentile(Pg[:, 1], 98))
+    Lm_raw = float(max(np.percentile(Pg[:, 2], 98), d_wall))
+    Wm = min(6.0, max(1.5, Wm_raw))
+    Lm = min(12.0, max(2.0, Lm_raw))
+    Hm = min(4.0, max(1.8, Hm_raw))
+    # Flag any dimension whose measurement hit a clamp — the caller surfaces this
+    # so a confidently-wrong auto-measure (e.g. a wall not fully in view) is shown
+    # as provisional rather than trusted.
+    clamped = {
+        "width": abs(Wm - Wm_raw) > 1e-6,
+        "length": abs(Lm - Lm_raw) > 1e-6,
+        "height": abs(Hm - Hm_raw) > 1e-6,
+    }
 
     d3 = lambda v: {"x": float(v[0]), "y": float(v[1]), "z": float(v[2])}
     return {
@@ -270,6 +292,7 @@ def auto_pose_from_depth(buf, scale, intr, fov_deg=55.0, step=4):
         "camera_up": d3(up_g),
         "camera_fov_deg": float(fov_deg),
         "garage": {"width": round(Wm, 2), "length": round(Lm, 2), "height": round(Hm, 2)},
+        "garage_clamped": clamped,
         "floor_height": round(h, 3),
         "wall_distance": round(d_wall, 3),
         "floor_points": floor["count"],
@@ -324,6 +347,10 @@ def _matches_vehicle(bb, expect):
     if not (0.30 * W <= foot_short <= 1.9 * W):
         return False
     if bb["height"] > 1.7 * H + 0.4:
+        return False
+    # Minimum height too: a long, flat thing (kayak, stacked timber) can clear the
+    # footprint gates but is not a car. Require a real vertical extent.
+    if bb["height"] < 0.4 * H:
         return False
     return True
 
@@ -388,11 +415,25 @@ def detect_object(buf, scale, intr, expect=None, step=4, min_h=0.08, max_h=2.5,
     def make_bbox(lab):
         g = obj_idx[labels == lab]
         ca, cb, ch = a[g], b[g], height[g]
+        # Oriented footprint: PCA on the floor-projected (a,b) points reports the
+        # car's true length/width along its own axes. The axis-aligned a/b min-max
+        # (kept for drawing the debug box) over-reports both dims for a car parked
+        # at an angle — which can wrongly trip the size gate.
+        pts = np.stack([ca, cb], axis=1)
+        ctr = pts.mean(axis=0)
+        try:
+            _, _, vt = np.linalg.svd(pts - ctr, full_matrices=False)
+            proj = (pts - ctr) @ vt.T
+            length = float(np.ptp(proj[:, 0]))
+            width = float(np.ptp(proj[:, 1]))
+        except np.linalg.LinAlgError:
+            length = float(ca.max() - ca.min())
+            width = float(cb.max() - cb.min())
         return g, {
             "a_min": float(ca.min()), "a_max": float(ca.max()),
             "b_min": float(cb.min()), "b_max": float(cb.max()),
-            "length": float(ca.max() - ca.min()),
-            "width": float(cb.max() - cb.min()),
+            "length": length,
+            "width": width,
             "height": float(ch.max()),
             "points": int(g.size),
         }
@@ -595,6 +636,11 @@ class DepthCamera:
                 self._error = f"pyorbbecsdk import failed: {exc}"
                 self._running = False
             return
+        try:
+            from app.sources.orbbec import quiet_orbbec_logs
+            quiet_orbbec_logs(ob)
+        except Exception:
+            pass
 
         while self._running:
             pipe = None

@@ -75,17 +75,24 @@ def _read_meminfo() -> dict:
         return {"total_mb": None, "used_mb": None, "percent": None}
 
 
+DISK_WARN_PERCENT = 90.0
+
+
 def _read_disk() -> dict:
     try:
         usage = shutil.disk_usage("/")
         gb = 1024 * 1024 * 1024
+        pct = round(100.0 * usage.used / usage.total, 1)
         return {
             "total_gb": round(usage.total / gb, 1),
             "used_gb": round(usage.used / gb, 1),
-            "percent": round(100.0 * usage.used / usage.total, 1),
+            "percent": pct,
+            # A full disk breaks every tmp-write-then-replace persistence path
+            # (calibration, sessions). Surface it so the UI/ops can react.
+            "low": pct >= DISK_WARN_PERCENT,
         }
     except OSError:
-        return {"total_gb": None, "used_gb": None, "percent": None}
+        return {"total_gb": None, "used_gb": None, "percent": None, "low": False}
 
 
 def _read_cpu_temp() -> Optional[float]:

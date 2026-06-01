@@ -26,6 +26,7 @@
           <div class="m-chips">
             <button class="m-chip tap" id="chip-source" type="button"><span class="m-dot" id="conn-dot"></span><span id="src-name">—</span></button>
             <button class="m-chip tap" id="chip-vehicle" type="button">—</button>
+            <button class="m-chip tap" id="chip-mute" type="button" aria-pressed="false" title="Alert sound">🔊</button>
           </div>
           <div class="m-viewtoggle" id="viewtoggle">
             <button class="active" data-mode="live" type="button">Live</button>
@@ -34,6 +35,9 @@
         </div>
 
         <div class="m-state state-safe" id="state-badge"><span id="state-text">—</span></div>
+
+        <!-- Big, glanceable proximity callout. Hidden unless warning/danger. -->
+        <div class="m-stop hidden" id="stop-banner"><span id="stop-text">STOP</span></div>
 
         <div class="m-disc hidden" id="disc">
           <div class="m-disc-title">NO CAMERA SIGNAL</div>

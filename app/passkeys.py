@@ -240,3 +240,14 @@ class SessionStore:
 
 
 sessions = SessionStore()
+
+
+def session_from_cookies(cookies) -> Optional[dict]:
+    """The single source of truth for 'is this request logged in?'. Returns the
+    valid session dict for a cookie jar (Starlette request/websocket .cookies),
+    or None. Shared by require_auth, /ws, and the terminal so they can't drift."""
+    try:
+        sid = cookies.get(SESSION_COOKIE_NAME)
+    except AttributeError:
+        sid = None
+    return sessions.get(sid) if sid else None

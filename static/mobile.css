@@ -85,9 +85,25 @@ body { overflow: hidden; }
   pointer-events: none;
 }
 .m-state.state-safe { color: var(--safe); }
+.m-state.state-parked { color: var(--safe); border-color: var(--safe); background: rgba(95,240,160,.14); }
 .m-state.state-warning { color: var(--warn); }
 .m-state.state-danger { color: var(--danger); animation: pulse 1s ease-in-out infinite; }
+.m-state.state-searching { color: var(--accent); }
+.m-state.state-uncalibrated { color: var(--muted); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+
+/* STOP / proximity banner — the one thing a reversing driver can read at a glance */
+.m-stop {
+  position: absolute; left: 12px; right: 12px; top: calc(var(--safe-top) + 96px);
+  z-index: 6; text-align: center; pointer-events: none;
+  border-radius: 14px; padding: 14px 12px;
+  font-weight: 900; letter-spacing: .04em; line-height: 1.05;
+  font-size: clamp(26px, 9vw, 46px);
+  backdrop-filter: blur(3px);
+}
+.m-stop.warn { color: #1a1205; background: rgba(255,200,87,.92); }
+.m-stop.danger { color: #1a0606; background: rgba(255,70,70,.95); animation: stopflash .5s steps(1) infinite; }
+@keyframes stopflash { 0%,100% { opacity: 1; } 50% { opacity: .62; } }
 
 /* disconnected note */
 .m-disc {
@@ -114,6 +130,12 @@ body { overflow: hidden; }
 .m-clear-cell.warn b { color: var(--warn); }
 .m-clear-cell.danger { background: rgba(255,107,107,.16); }
 .m-clear-cell.danger b { color: var(--danger); }
+/* The controlling (smallest) side is emphasised so the driver doesn't have to
+   scan five numbers and find the minimum mid-reverse. */
+.m-clear-cell.controlling { background: rgba(111,211,255,.10); outline: 1px solid var(--line); }
+.m-clear-cell.controlling b { font-size: 19px; }
+.m-clear-cell.controlling.danger { background: rgba(255,107,107,.28); }
+.m-clear-cell.controlling.warn { background: rgba(255,200,87,.16); }
 
 /* ── bottom tabs ── */
 .m-tabs {
