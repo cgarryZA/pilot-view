@@ -3,10 +3,11 @@ import re
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import auth, automations, calibration, depth, diagnostics, pose_solver, terminal
+from app import auth, automations, calibration, depth, diagnostics, pose_solver, terminal, widget
 from app.auth import require_auth, current_session
 from app.battery_monitor import battery_monitor
 from app.door import door
@@ -22,7 +23,29 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = PROJECT_ROOT / "static"
 
 app = FastAPI(title="Pilot View")
+
+# CORS — the workshop dashboard (localhost:4000 in dev,
+# workshop.christiangarry.com in prod) polls /widget cross-origin. GPI also
+# pulls /widget snapshots and tool catalogues from here. Without these
+# origins listed the browser blocks the response even though the server
+# returns 200.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8100", "http://127.0.0.1:8100",
+        "http://localhost:4000", "http://127.0.0.1:4000",
+        "http://localhost:8200", "http://127.0.0.1:8200",
+        "https://pilot.christiangarry.com",
+        "https://workshop.christiangarry.com",
+        "https://gpi.christiangarry.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router)
+app.include_router(widget.router)
 
 
 @app.middleware("http")

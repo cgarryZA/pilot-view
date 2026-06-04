@@ -13,3 +13,9 @@ webauthn
 numpy
 opencv-python
 scipy
+
+# LifeOS integration — MCP server (mcp/server.py) + /widget endpoint
+mcp[cli]>=1.0
+httpx>=0.27
+pydantic>=2
+cryptography
